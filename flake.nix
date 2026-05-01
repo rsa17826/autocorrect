@@ -23,15 +23,15 @@
             evdev
           ]
         );
-        myApp = pkgs.writeShellScriptBin "audioMover" ''
-          ${pythonEnv}/bin/python ${./audio_manager.py} "$@"
+        myApp = pkgs.writeShellScriptBin "autocorrect_daemon" ''
+          ${pythonEnv}/bin/python ${./autocorrect_daemon.py} ${./corrections.json} "$@"
         '';
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = [
+          buildInputs = with pkgs; [
             pythonEnv
-            pkgs.mp3gain
+            wtype
           ];
         };
         packages.default = myApp;

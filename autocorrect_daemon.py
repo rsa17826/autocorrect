@@ -15,6 +15,7 @@ Your user must be in the 'input' group:
 """
 
 import asyncio
+from syslog import LOG_WARNING
 import evdev
 import json
 import logging
@@ -358,13 +359,24 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(
     description="AHK-style autocorrect daemon for Linux"
   )
-  parser.add_argument(
+  os.makedirs(
+    os.path.join(
+      os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+      "autocorrect_daemon",
+    ),
+    exist_ok=True,
+  )
+  _ = parser.add_argument(
     "corrections",
     nargs="?",
-    default=str(Path(__file__).parent / "corrections.json"),
+    default=os.path.join(
+      os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")),
+      "autocorrect_daemon",
+      "corrections.json",
+    ),
     help="Path to corrections JSON file (default: corrections.json next to this script)",
   )
-  parser.add_argument(
+  _ = parser.add_argument(
     "--log-level",
     default="INFO",
     choices=["DEBUG", "INFO", "WARNING", "ERROR"],
