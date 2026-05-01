@@ -174,15 +174,15 @@ def send_correction(n_backspaces: int, text: str, backend: str) -> None:
   """Delete n_backspaces chars then type text."""
   try:
     if backend == "wayland":
-      if n_backspaces:
-        # ydotool key accepts key names
-        subprocess.run(
-          ["ydotool", "key"] + ["BackSpace"] * n_backspaces,
-          check=True,
-          timeout=2,
-        )
+      # wtype handles both keys and text in one invocation — no daemon needed.
+      # -k BackSpace sends a backspace key; positional args type literal text.
+      # Build: wtype -k BackSpace -k BackSpace ... "replacement text"
+      cmd = ["wtype"]
+      for _ in range(n_backspaces):
+        cmd += ["-k", "BackSpace"]
       if text:
-        subprocess.run(["wtype", text], check=True, timeout=2)
+        cmd.append(text)
+      subprocess.run(cmd, check=True, timeout=2)
     else: # x11
       if n_backspaces:
         subprocess.run(
