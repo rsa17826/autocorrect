@@ -23,8 +23,8 @@
             evdev
           ]
         );
-        myApp = pkgs.writeShellScriptBin "autocorrect-daemon" ''
-          ${pythonEnv}/bin/python ${./autocorrect_daemon.py} ${./corrections.json} "$@"
+        myApp = pkgs.writeShellScriptBin "autocorrect" ''
+          ${pythonEnv}/bin/python ${./autocorrect.py} ${./corrections.json} "$@"
         '';
       in
       {
