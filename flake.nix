@@ -27,6 +27,7 @@
           export PATH="${pkgs.lib.makeBinPath [ pkgs.wtype ]}:$PATH"
           exec ${pythonEnv}/bin/python ${
             (pkgs.symlinkJoin {
+              name = "autocorrect";
               paths = [
                 ./corrections.json
                 ./autocorrect.py
