@@ -292,11 +292,14 @@ class AutoCorrect:
       actual_char = (
         "\n" if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER) else char
       )
-      print(self.buffer)
+      print(self.buffer, "[" + actual_char + "]")
       # Check for match
       typed_before = self.buffer[:-1]
       for wrong, right in self.corrections.items():
-        if typed_before.endswith(wrong):
+        if typed_before.endswith(wrong) and (
+          len(typed_before) == len(wrong)
+          or typed_before[-(len(wrong)+1)] not in "qwertyuiopasdfghjklzxcvbnm"
+        ):
           self.apply_correction(ui, wrong, right, key)
           # Update internal buffer
           self.buffer = self.buffer[: -(len(wrong) + 1)] + right + actual_char
