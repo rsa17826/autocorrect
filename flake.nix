@@ -25,7 +25,14 @@
         );
         myApp = pkgs.writeShellScriptBin "autocorrect" ''
           export PATH="${pkgs.lib.makeBinPath [ pkgs.wtype ]}:$PATH"
-          exec ${pythonEnv}/bin/python ${./autocorrect.py} ${./corrections.json} "$@"
+          exec ${pythonEnv}/bin/python ${
+            (pkgs.symlinkJoin {
+              paths = [
+                ./corrections.json
+                ./autocorrect.py
+              ];
+            })
+          } "$@"
         '';
       in
       {

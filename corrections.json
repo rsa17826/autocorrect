@@ -5222,5 +5222,5 @@
   "yuo": "you",
   "yuor": "your",
   "zeebra": "zebra",
-  "stopprop": "e.preventDefault()\n"
+  "stopprop": "e.preventDefault()\ne.stopPropagation()\ne.stopImmediatePropagation()"
 }
