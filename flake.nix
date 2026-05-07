@@ -33,7 +33,7 @@
                 ./autocorrect.py
               ];
             })
-          } "$@"
+          }/autocorrect.py "$@"
         '';
       in
       {
