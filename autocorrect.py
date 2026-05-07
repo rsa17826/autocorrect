@@ -297,8 +297,7 @@ class AutoCorrect:
         if typed_before.endswith(wrong):
           self.apply_correction(ui, wrong, right, key)
           # Update internal buffer
-          self.buffer=''
-          # self.buffer = self.buffer[:-(len(wrong)+1)] + right + actual_char
+          self.buffer = self.buffer[:-(len(wrong)+1)] + right + actual_char
           return True # Swallow the trigger; apply_correction handles it
 
     return False
