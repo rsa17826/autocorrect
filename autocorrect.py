@@ -78,6 +78,8 @@ NORMAL: dict[int, str] = {
   ecodes.KEY_COMMA: ",",
   ecodes.KEY_DOT: ".",
   ecodes.KEY_SLASH: "/",
+  ecodes.KEY_ENTER: "\n",
+  ecodes.KEY_KPENTER: "\n",
 }
 
 SHIFTED: dict[int, str] = {
@@ -129,6 +131,8 @@ SHIFTED: dict[int, str] = {
   ecodes.KEY_COMMA: "<",
   ecodes.KEY_DOT: ">",
   ecodes.KEY_SLASH: "?",
+  ecodes.KEY_ENTER: "\n",
+  ecodes.KEY_KPENTER: "\n",
 }
 
 # Keys that signal the user has moved the cursor — reset the buffer
@@ -283,17 +287,18 @@ class AutoCorrect:
       self.buffer = self.buffer[-self.BUFFER_MAX:]
 
     # Trigger Logic
-    print(char)
+
     if char in TRIGGER_CHARS or key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER):
       actual_char = "\n" if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER) else char
-
+      print(self.buffer)
       # Check for match
       typed_before = self.buffer[:-1]
       for wrong, right in self.corrections.items():
         if typed_before.endswith(wrong):
           self.apply_correction(ui, wrong, right, key)
           # Update internal buffer
-          self.buffer = self.buffer[:-(len(wrong)+1)] + right + actual_char
+          self.buffer=''
+          # self.buffer = self.buffer[:-(len(wrong)+1)] + right + actual_char
           return True # Swallow the trigger; apply_correction handles it
 
     return False
@@ -308,6 +313,7 @@ class AutoCorrect:
     # 2. Type the 'right' word
     # Note: For a robust version, you'd map 'right' chars back to keycodes.
     # Simple hack: use the UInput.type() method if available or map manually.
+    print(right)
     for c in right:
       self.type_char(ui, c)
 
