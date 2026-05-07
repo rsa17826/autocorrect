@@ -3404,7 +3404,6 @@
   "optmizations": "optimizations",
   "optomism": "optimism",
   "orded": "ordered",
-  "ore": "øre",
   "organim": "organism",
   "organiztion": "organization",
   "orgin": "origin",
@@ -5222,5 +5221,6 @@
   "ytou": "you",
   "yuo": "you",
   "yuor": "your",
-  "zeebra": "zebra"
+  "zeebra": "zebra",
+  "stopprop": "e.preventDefault()\ntest"
 }

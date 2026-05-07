@@ -23,7 +23,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from evdev import InputDevice, categorize, ecodes
+from evdev import InputDevice, ecodes, UInput
 
 # ---------------------------------------------------------------------------
 # Key → character tables
@@ -183,17 +183,17 @@ def send_correction(n_backspaces: int, text: str, backend: str) -> None:
         cmd += ["-k", "BackSpace"]
       if text:
         cmd.append(text)
-      subprocess.run(cmd, check=True, timeout=2)
+      _ = subprocess.run(cmd, check=True, timeout=2)
     else: # x11
       if n_backspaces:
-        subprocess.run(
+        _ = subprocess.run(
           ["xdotool", "key", "--clearmodifiers"]
           + ["BackSpace"] * n_backspaces,
           check=True,
           timeout=2,
         )
       if text:
-        subprocess.run(
+        _ = subprocess.run(
           ["xdotool", "type", "--clearmodifiers", "--delay", "0", text],
           check=True,
           timeout=2,
@@ -230,100 +230,122 @@ def find_keyboards() -> list[InputDevice]:
 
 
 class AutoCorrect:
-  BUFFER_MAX = 150 # keep last N chars; enough for any hotstring
+  BUFFER_MAX = 150
 
-  def __init__(self, corrections: dict[str, str], backend: str):
-    # Sort by trigger length descending so longer matches win
+  def __init__(self, corrections: dict[str, str]):
     self.corrections = dict(sorted(corrections.items(), key=lambda kv: -len(kv[0])))
-    self.backend = backend
     self.buffer: str = ""
-    self.shift_held: bool = False
-    self.capslock_on: bool = False
+    self.shift_held = False
+    self.capslock_on = False
 
-  def handle_event(self, event: evdev.InputEvent) -> None:
+  def handle_event(self, event, ui: UInput):
+    """
+    Processes event and returns True if the key was 'swallowed' or modified.
+    Otherwise returns False so the caller can pass the original event through.
+    """
     if event.type != ecodes.EV_KEY:
-      return
+      return False
 
     key = event.code
     action = event.value # 0=up, 1=down, 2=hold
 
-    # Track shift keys
+    # Modifier Tracking
     if key in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
-      self.shift_held = action != 0
-      return
+      self.shift_held = (action != 0)
+      return False
 
-    # Track caps lock (toggle on keydown)
     if key == ecodes.KEY_CAPSLOCK and action == 1:
       self.capslock_on = not self.capslock_on
-      return
+      return False
 
-    # Only act on key-down and key-repeat
-    if action not in (1, 2):
-      return
+    if action == 0: # Key Up: always pass through to avoid stuck keys
+      return False
 
-    # Backspace: trim buffer
-    if key == ecodes.KEY_BACKSPACE:
-      self.buffer = self.buffer[:-1]
-      return
-
-    # Enter / Return → treat as trigger char then reset
-    if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER):
-      self._process_trigger("\n")
-      self.buffer = ""
-      return
-
-    # Cursor movement → invalidate buffer
+    # Reset logic
     if key in RESET_KEYS:
       self.buffer = ""
-      return
+      return False
 
-    # Resolve character
-    is_shifted = self.shift_held ^ self.capslock_on # XOR so caps+shift = lower
+    if key == ecodes.KEY_BACKSPACE:
+      self.buffer = self.buffer[:-1]
+      return False
+
+    # Character Mapping
+    is_shifted = self.shift_held ^ self.capslock_on
     table = SHIFTED if is_shifted else NORMAL
     char = table.get(key)
-    if char is None:
-      return # unknown / modifier key
 
-    # Add to buffer
+    if char is None:
+      return False
+
     self.buffer += char
     if len(self.buffer) > self.BUFFER_MAX:
-      self.buffer = self.buffer[-self.BUFFER_MAX :]
+      self.buffer = self.buffer[-self.BUFFER_MAX:]
 
-    # If it's a trigger character, check for corrections
-    if char in TRIGGER_CHARS:
-      self._process_trigger(char)
+    # Trigger Logic
+    print(char)
+    if char in TRIGGER_CHARS or key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER):
+      actual_char = "\n" if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER) else char
 
-  def _process_trigger(self, trigger: str) -> None:
-    """Check whether the text before the trigger matches any hotstring."""
-    # Text typed so far, without the trigger char at the end
-    typed = self.buffer[: -len(trigger)] if trigger else self.buffer
+      # Check for match
+      typed_before = self.buffer[:-1]
+      for wrong, right in self.corrections.items():
+        if typed_before.endswith(wrong):
+          self.apply_correction(ui, wrong, right, key)
+          # Update internal buffer
+          self.buffer = self.buffer[:-(len(wrong)+1)] + right + actual_char
+          return True # Swallow the trigger; apply_correction handles it
 
-    for wrong, right in self.corrections.items():
-      if typed.endswith(wrong):
-        # Match found!
-        n_bs = len(wrong) + len(trigger) # delete wrong word + trigger
-        replacement = right + trigger # correct word + original trigger
-        logging.debug("Correcting %r -> %r", wrong, right)
-        send_correction(n_bs, replacement, self.backend)
-        # Update our own buffer to reflect the correction
-        self.buffer = (
-          self.buffer[: -(len(wrong) + len(trigger))] + right + trigger
-        )
-        return # only apply the first (longest) match
+    return False
 
+  def apply_correction(self, ui: UInput, wrong: str, right: str, trigger_key: int):
+    """Deletes the wrong word and sends the right word + the trigger."""
+    # 1. Send Backspaces for the 'wrong' word
+    for _ in range(len(wrong)):
+      ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 1)
+      ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 0)
 
-# ---------------------------------------------------------------------------
-# Async multi-device listener
-# ---------------------------------------------------------------------------
+    # 2. Type the 'right' word
+    # Note: For a robust version, you'd map 'right' chars back to keycodes.
+    # Simple hack: use the UInput.type() method if available or map manually.
+    for c in right:
+      self.type_char(ui, c)
 
+    # 3. Finally, send the original trigger key (Space, Enter, etc.)
+    ui.write(ecodes.EV_KEY, trigger_key, 1)
+    ui.write(ecodes.EV_KEY, trigger_key, 0)
+    ui.syn()
 
-async def monitor_device(dev: InputDevice, ac: AutoCorrect) -> None:
-  logging.info("Monitoring: %s", dev.name)
+  def type_char(self, ui, char):
+    """Basic char-to-keycode injector for the virtual keyboard."""
+    # Reverse lookup from our tables
+    source_table = SHIFTED if char.isupper() or char in SHIFTED.values() else NORMAL
+    for code, c in source_table.items():
+      if c == char:
+        if source_table == SHIFTED:
+          ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 1)
+        ui.write(ecodes.EV_KEY, code, 1)
+        ui.write(ecodes.EV_KEY, code, 0)
+        if source_table == SHIFTED:
+          ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
+        return
+
+async def monitor_device(dev: InputDevice, ac: AutoCorrect):
+  # Create virtual device
+  ui = UInput.from_device(dev, name="Autocorrect-Virtual")
+
+  # IMPORTANT: Grab device to block raw input
+  dev.grab()
+  logging.info(f"Blocking raw input from: {dev.name}")
+
   try:
     async for event in dev.async_read_loop():
-      ac.handle_event(event)
-  except OSError as e:
-    logging.warning("Device lost (%s): %s", dev.name, e)
+      swallowed = ac.handle_event(event, ui)
+      if not swallowed:
+        ui.write_event(event)
+        ui.syn()
+  finally:
+    dev.ungrab()
 
 
 async def main_loop(corrections_path: str) -> None:
@@ -332,21 +354,38 @@ async def main_loop(corrections_path: str) -> None:
     corrections = json.load(f)
   logging.info("Loaded %d corrections from %s", len(corrections), corrections_path)
 
-  backend = detect_backend()
-  logging.info("Output backend: %s", backend)
-
   keyboards = find_keyboards()
-  if not keyboards:
-    logging.error(
-      "No keyboard devices found. "
-      "Make sure your user is in the 'input' group and re-login."
-    )
-    sys.exit(1)
+  ac = AutoCorrect(corrections)
+  tasks = []
 
-  ac = AutoCorrect(corrections, backend)
+  for dev in keyboards:
+    # 1. Skip virtual devices to prevent feedback loops
+    name_lower = dev.name.lower()
+    if any(x in name_lower for x in ["virtual", "ydotool", "keyd", "autocorrect"]):
+      continue
 
-  # Monitor all keyboards concurrently
-  await asyncio.gather(*(monitor_device(dev, ac) for dev in keyboards))
+    try:
+      # 2. Test the grab immediately.
+      # If keyd or another daemon has it, this will trigger the OSError.
+      dev.grab()
+      # If we got here, we successfully grabbed it.
+      # We ungrab briefly so the async monitor can manage it.
+      dev.ungrab()
+
+      logging.info(f"Adding task for: {dev.name}")
+      tasks.append(monitor_device(dev, ac))
+
+    except OSError as e:
+      if e.errno == 16:
+        logging.warning(f"Skipping {dev.name}: Device busy (likely grabbed by keyd)")
+      else:
+        logging.error(f"Failed to access {dev.name}: {e}")
+
+  if not tasks:
+    logging.error("No accessible physical keyboards found.")
+    return
+
+  await asyncio.gather(*tasks)
 
 
 # ---------------------------------------------------------------------------
