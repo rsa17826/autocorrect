@@ -153,59 +153,6 @@ RESET_KEYS = {
 # (the char that follows the misspelling to fire the correction)
 TRIGGER_CHARS = set(" \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\"")
 
-
-# ---------------------------------------------------------------------------
-# Display / output backend detection
-# ---------------------------------------------------------------------------
-
-
-def _cmd_exists(cmd: str) -> bool:
-  from shutil import which
-
-  return which(cmd) is not None
-
-
-def detect_backend() -> str:
-  """Return 'wayland' or 'x11' based on the running session."""
-  if os.environ.get("WAYLAND_DISPLAY"):
-    return "wayland"
-  if os.environ.get("DISPLAY"):
-    return "x11"
-  # Fallback: try to guess
-  return "wayland" if _cmd_exists("wtype") else "x11"
-
-
-def send_correction(n_backspaces: int, text: str, backend: str) -> None:
-  """Delete n_backspaces chars then type text."""
-  try:
-    if backend == "wayland":
-      # wtype handles both keys and text in one invocation — no daemon needed.
-      # -k BackSpace sends a backspace key; positional args type literal text.
-      # Build: wtype -k BackSpace -k BackSpace ... "replacement text"
-      cmd = ["wtype"]
-      for _ in range(n_backspaces):
-        cmd += ["-k", "BackSpace"]
-      if text:
-        cmd.append(text)
-      _ = subprocess.run(cmd, check=True, timeout=2)
-    else: # x11
-      if n_backspaces:
-        _ = subprocess.run(
-          ["xdotool", "key", "--clearmodifiers"]
-          + ["BackSpace"] * n_backspaces,
-          check=True,
-          timeout=2,
-        )
-      if text:
-        _ = subprocess.run(
-          ["xdotool", "type", "--clearmodifiers", "--delay", "0", text],
-          check=True,
-          timeout=2,
-        )
-  except (subprocess.CalledProcessError, FileNotFoundError) as e:
-    logging.warning("send_correction failed: %s", e)
-
-
 # ---------------------------------------------------------------------------
 # Keyboard device discovery
 # ---------------------------------------------------------------------------
