@@ -240,6 +240,9 @@ class AutoCorrect:
     self.corrections = dict(sorted(corrections.items(), key=lambda kv: -len(kv[0])))
     self.buffer: str = ""
     self.shift_held = False
+    self.ctrl_held = False
+    self.alt_held = False
+    self.meta_held = False # Windows/Super key
     self.capslock_on = False
 
   def handle_event(self, event, ui: UInput):
@@ -258,6 +261,19 @@ class AutoCorrect:
       self.shift_held = action != 0
       return False
 
+    if key in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
+      self.shift_held = action != 0
+      return False
+    if key in (ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL):
+      self.ctrl_held = action != 0
+      return False
+    if key in (ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT):
+      self.alt_held = action != 0
+      return False
+    if key in (ecodes.KEY_LEFTMETA, ecodes.KEY_RIGHTMETA):
+      self.meta_held = action != 0
+      return False
+
     if key == ecodes.KEY_CAPSLOCK and action == 1:
       self.capslock_on = not self.capslock_on
       return False
@@ -266,7 +282,7 @@ class AutoCorrect:
       return False
 
     # Reset logic
-    if key in RESET_KEYS:
+    if key in RESET_KEYS or self.ctrl_held or self.alt_held or self.meta_held:
       self.buffer = ""
       return False
 
@@ -298,7 +314,8 @@ class AutoCorrect:
       for wrong, right in self.corrections.items():
         if typed_before.endswith(wrong) and (
           len(typed_before) == len(wrong)
-          or typed_before[-(len(wrong)+1)] not in "qwertyuiopasdfghjklzxcvbnm"
+          or typed_before[-(len(wrong) + 1)]
+          not in "qwertyuiopasdfghjklzxcvbnm"
         ):
           self.apply_correction(ui, wrong, right, key)
           # Update internal buffer
