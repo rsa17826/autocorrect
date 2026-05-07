@@ -255,7 +255,7 @@ class AutoCorrect:
 
     # Modifier Tracking
     if key in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
-      self.shift_held = (action != 0)
+      self.shift_held = action != 0
       return False
 
     if key == ecodes.KEY_CAPSLOCK and action == 1:
@@ -284,12 +284,14 @@ class AutoCorrect:
 
     self.buffer += char
     if len(self.buffer) > self.BUFFER_MAX:
-      self.buffer = self.buffer[-self.BUFFER_MAX:]
+      self.buffer = self.buffer[-self.BUFFER_MAX :]
 
     # Trigger Logic
 
     if char in TRIGGER_CHARS or key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER):
-      actual_char = "\n" if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER) else char
+      actual_char = (
+        "\n" if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER) else char
+      )
       print(self.buffer)
       # Check for match
       typed_before = self.buffer[:-1]
@@ -297,7 +299,7 @@ class AutoCorrect:
         if typed_before.endswith(wrong):
           self.apply_correction(ui, wrong, right, key)
           # Update internal buffer
-          self.buffer = self.buffer[:-(len(wrong)+1)] + right + actual_char
+          self.buffer = self.buffer[: -(len(wrong) + 1)] + right + actual_char
           return True # Swallow the trigger; apply_correction handles it
 
     return False
@@ -335,6 +337,7 @@ class AutoCorrect:
           ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
         return
 
+
 async def monitor_device(dev: InputDevice, ac: AutoCorrect):
   # Create virtual device
   ui = UInput.from_device(dev, name="Autocorrect-Virtual")
@@ -355,6 +358,14 @@ async def monitor_device(dev: InputDevice, ac: AutoCorrect):
 
 async def main_loop(corrections_path: str) -> None:
   # Load corrections
+  default_config_path = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "corrections.json"
+  )
+  if not os.path.exists(default_config_path):
+    import shutil
+
+    _ = shutil.copy(default_config_path, corrections_path)
+
   with open(corrections_path, encoding="utf-8") as f:
     corrections = json.load(f)
   logging.info("Loaded %d corrections from %s", len(corrections), corrections_path)
@@ -382,7 +393,9 @@ async def main_loop(corrections_path: str) -> None:
 
     except OSError as e:
       if e.errno == 16:
-        logging.warning(f"Skipping {dev.name}: Device busy (likely grabbed by keyd)")
+        logging.warning(
+          f"Skipping {dev.name}: Device busy (likely grabbed by keyd)"
+        )
       else:
         logging.error(f"Failed to access {dev.name}: {e}")
 
