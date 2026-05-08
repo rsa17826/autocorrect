@@ -323,7 +323,9 @@ async def monitor_device(dev: InputDevice, ac: AutoCorrect):
     dev.ungrab()
 
 
-async def main_loop(corrections_path: str) -> None:
+async def main_loop(
+  corrections_path: str, include_list: list = None, exclude_list: list = None
+) -> None:
   # Load corrections
   default_config_path = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "corrections.json"
@@ -342,6 +344,22 @@ async def main_loop(corrections_path: str) -> None:
   tasks = []
 
   for dev in keyboards:
+    name_lower = dev.name.lower()
+    if include_list:
+      # Check if device matches any 'include' string
+      if not any(inc.lower() in name_lower for inc in include_list):
+        continue
+    else:
+      # Default behavior + Exclude list logic
+
+      # Default: Skip virtual devices to prevent feedback loops
+      default_skip = ["virtual", "ydotool", "keyd", "autocorrect"]
+      if any(x in name_lower for x in default_skip):
+        continue
+
+      # User-defined exclusion
+      if exclude_list and any(exc.lower() in name_lower for exc in exclude_list):
+        continue
     # 1. Skip virtual devices to prevent feedback loops
     name_lower = dev.name.lower()
     if any(x in name_lower for x in ["virtual", "ydotool", "keyd", "autocorrect"]):
@@ -405,6 +423,16 @@ if __name__ == "__main__":
     default="INFO",
     choices=["DEBUG", "INFO", "WARNING", "ERROR"],
   )
+  _ = parser.add_argument(
+    "--include",
+    nargs="+",
+    help="Only use devices that contain these strings in their name (case-insensitive).",
+  )
+  _ = parser.add_argument(
+    "--exclude",
+    nargs="+",
+    help="Ignore devices that contain these strings in their name.",
+  )
   args = parser.parse_args()
 
   logging.basicConfig(
@@ -414,6 +442,6 @@ if __name__ == "__main__":
   )
 
   try:
-    asyncio.run(main_loop(args.corrections))
+    asyncio.run(main_loop(args.corrections, args.include, args.exclude))
   except KeyboardInterrupt:
     logging.info("Stopped.")
