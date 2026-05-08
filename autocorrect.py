@@ -277,7 +277,7 @@ class AutoCorrect:
     for _ in range(len(wrong)):
       ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 1)
       ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 0)
-
+    ui.syn()
     # 2. Type the 'right' word
     # Note: For a robust version, you'd map 'right' chars back to keycodes.
     # Simple hack: use the UInput.type() method if available or map manually.
