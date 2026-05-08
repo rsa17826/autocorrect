@@ -277,15 +277,13 @@ class AutoCorrect:
     for _ in range(len(wrong)):
       ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 1)
       ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 0)
-      ui.syn()
-    ui.syn()
+
     # 2. Type the 'right' word
     # Note: For a robust version, you'd map 'right' chars back to keycodes.
     # Simple hack: use the UInput.type() method if available or map manually.
     print(right)
     for c in right:
       self.type_char(ui, c)
-      ui.syn()
 
     # 3. Finally, send the original trigger key (Space, Enter, etc.)
     ui.write(ecodes.EV_KEY, trigger_key, 1)
@@ -298,6 +296,7 @@ class AutoCorrect:
     source_table = SHIFTED if char.isupper() or char in SHIFTED.values() else NORMAL
     for code, c in source_table.items():
       if c == char:
+        ui.write(ecodes.EV_KEY, code, 0)
         if source_table == SHIFTED:
           ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 1)
         ui.write(ecodes.EV_KEY, code, 1)
