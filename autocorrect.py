@@ -277,6 +277,7 @@ class AutoCorrect:
     for _ in range(len(wrong)):
       ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 1)
       ui.write(ecodes.EV_KEY, ecodes.KEY_BACKSPACE, 0)
+      ui.syn()
     ui.syn()
     # 2. Type the 'right' word
     # Note: For a robust version, you'd map 'right' chars back to keycodes.
@@ -284,6 +285,7 @@ class AutoCorrect:
     print(right)
     for c in right:
       self.type_char(ui, c)
+      ui.syn()
 
     # 3. Finally, send the original trigger key (Space, Enter, etc.)
     ui.write(ecodes.EV_KEY, trigger_key, 1)
