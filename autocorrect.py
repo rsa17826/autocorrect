@@ -296,6 +296,7 @@ class AutoCorrect:
     source_table = SHIFTED if char.isupper() or char in SHIFTED.values() else NORMAL
     for code, c in source_table.items():
       if c == char:
+        # force key up first to allow pressing again incase it thinks it should be pressed
         ui.write(ecodes.EV_KEY, code, 0)
         if source_table == SHIFTED:
           ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 1)
@@ -304,7 +305,6 @@ class AutoCorrect:
         if source_table == SHIFTED:
           ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
         return
-
 
 async def monitor_device(dev: InputDevice, ac: AutoCorrect):
   # Create virtual device
