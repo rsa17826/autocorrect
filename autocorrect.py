@@ -264,10 +264,10 @@ class AutoCorrect:
           if len(typed_before) == len(wrong):
             r=True
           else:
-            prev = typed_before[-(len(wrong))+ 1]
+            prev = typed_before[-(len(wrong))- 1]
             curr = typed_before[-(len(wrong))]
             nxt = typed_before[-(len(wrong))+ 1]
-
+            # print(typed_before, prev, curr, nxt, len(wrong))
             # 1. Standard start (preceded by non-letter)
             if not prev.isalpha():
               r= True
