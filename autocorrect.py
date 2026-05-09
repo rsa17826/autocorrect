@@ -184,13 +184,13 @@ class AutoCorrect:
   BUFFER_MAX = 150
 
   def __init__(self, corrections: dict[str, str]):
-    self.corrections = dict(sorted(corrections.items(), key=lambda kv: -len(kv[0])))
+    self.corrections: dict[str, str] = dict(sorted(corrections.items(), key=lambda kv: -len(kv[0])))
     self.buffer: str = ""
-    self.shift_held = False
-    self.ctrl_held = False
-    self.alt_held = False
-    self.meta_held = False # Windows/Super key
-    self.capslock_on = False
+    self.shift_held:bool = False
+    self.ctrl_held:bool = False
+    self.alt_held:bool = False
+    self.meta_held:bool = False # Windows/Super key
+    self.capslock_on:bool = False
 
   def handle_event(self, event, ui: UInput):
     """
@@ -259,15 +259,31 @@ class AutoCorrect:
       # Check for match
       typed_before = self.buffer[:-1]
       for wrong, right in self.corrections.items():
-        if typed_before.endswith(wrong) and (
-          len(typed_before) == len(wrong)
-          or typed_before[-(len(wrong) + 1)]
-          not in "qwertyuiopasdfghjklzxcvbnm"
-        ):
-          self.apply_correction(ui, wrong, right, key)
-          # Update internal buffer
-          self.buffer = self.buffer[: -(len(wrong) + 1)] + right + actual_char
-          return True # Swallow the trigger; apply_correction handles it
+        if typed_before.endswith(wrong):
+          r=False
+          if len(typed_before) == len(wrong):
+            r=True
+          else:
+            prev = typed_before[-(len(wrong))+ 1]
+            curr = typed_before[-(len(wrong))]
+            nxt = typed_before[-(len(wrong))+ 1]
+
+            # 1. Standard start (preceded by non-letter)
+            if not prev.isalpha():
+              r= True
+
+            # 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
+            if prev.islower() and curr.isupper():
+              r= True
+
+            # 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa in HTMLParser)
+            if prev.isupper() and curr.isupper() and nxt.islower():
+              r= True
+          if r:
+            self.apply_correction(ui, wrong, right, key)
+            # Update internal buffer
+            self.buffer = self.buffer[: -(len(wrong) + 1)] + right + actual_char
+            return True # Swallow the trigger; apply_correction handles it
 
     return False
 
