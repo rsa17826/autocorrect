@@ -184,13 +184,15 @@ class AutoCorrect:
   BUFFER_MAX = 150
 
   def __init__(self, corrections: dict[str, str]):
-    self.corrections: dict[str, str] = dict(sorted(corrections.items(), key=lambda kv: -len(kv[0])))
+    self.corrections: dict[str, str] = dict(
+      sorted(corrections.items(), key=lambda kv: -len(kv[0]))
+    )
     self.buffer: str = ""
-    self.shift_held:bool = False
-    self.ctrl_held:bool = False
-    self.alt_held:bool = False
-    self.meta_held:bool = False # Windows/Super key
-    self.capslock_on:bool = False
+    self.shift_held: bool = False
+    self.ctrl_held: bool = False
+    self.alt_held: bool = False
+    self.meta_held: bool = False # Windows/Super key
+    self.capslock_on: bool = False
 
   def handle_event(self, event, ui: UInput):
     """
@@ -260,29 +262,31 @@ class AutoCorrect:
       typed_before = self.buffer[:-1]
       for wrong, right in self.corrections.items():
         if typed_before.endswith(wrong):
-          r=False
+          r = False
           if len(typed_before) == len(wrong):
-            r=True
+            r = True
           else:
-            prev = typed_before[-(len(wrong))- 1]
+            prev = typed_before[-(len(wrong)) - 1]
             curr = typed_before[-(len(wrong))]
-            nxt = typed_before[-(len(wrong))+ 1]
+            nxt = typed_before[-(len(wrong)) + 1]
             # print(typed_before, prev, curr, nxt, len(wrong))
             # 1. Standard start (preceded by non-letter)
             if not prev.isalpha():
-              r= True
+              r = True
 
             # 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
             if prev.islower() and curr.isupper():
-              r= True
+              r = True
 
             # 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa in HTMLParser)
             if prev.isupper() and curr.isupper() and nxt.islower():
-              r= True
+              r = True
           if r:
             self.apply_correction(ui, wrong, right, key)
             # Update internal buffer
-            self.buffer = self.buffer[: -(len(wrong) + 1)] + right + actual_char
+            self.buffer = (
+              self.buffer[: -(len(wrong) + 1)] + right + actual_char
+            )
             return True # Swallow the trigger; apply_correction handles it
 
     return False
@@ -329,6 +333,16 @@ async def monitor_device(dev: InputDevice, ac: AutoCorrect):
   # IMPORTANT: Grab device to block raw input
   dev.grab()
   logging.info(f"Blocking raw input from: {dev.name}")
+
+  # Release any keys that were already held when we grabbed the device.
+  # Without this, the receiving application sees a key-down it sent before
+  # the grab but never receives the matching key-up, leaving the key stuck.
+  held = dev.active_keys()
+  if held:
+    logging.debug("Releasing %d key(s) held at grab time: %s", len(held), held)
+    for key_code in held:
+      ui.write(ecodes.EV_KEY, key_code, 0)
+    ui.syn()
 
   try:
     async for event in dev.async_read_loop():
