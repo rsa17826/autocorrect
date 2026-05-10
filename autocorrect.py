@@ -257,7 +257,7 @@ class AutoCorrect:
       actual_char = (
         "\n" if key in (ecodes.KEY_ENTER, ecodes.KEY_KPENTER) else char
       )
-      print(self.buffer, "[" + actual_char + "]")
+      # print(self.buffer, "[" + actual_char + "]")
       # Check for match
       typed_before = self.buffer[:-1]
       for wrong, right in self.corrections.items():
@@ -301,7 +301,7 @@ class AutoCorrect:
     # 2. Type the 'right' word
     # Note: For a robust version, you'd map 'right' chars back to keycodes.
     # Simple hack: use the UInput.type() method if available or map manually.
-    print(right)
+    # print(right)
     for c in right:
       self.type_char(ui, c)
 
