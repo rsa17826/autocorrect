@@ -15,6 +15,8 @@ Your user must be in the 'input' group:
 """
 
 import asyncio
+import collections
+from collections.abc import Sequence
 from syslog import LOG_WARNING
 import evdev
 import json
@@ -156,6 +158,20 @@ TRIGGER_CHARS = set(" \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\"")
 # ---------------------------------------------------------------------------
 # Keyboard device discovery
 # ---------------------------------------------------------------------------
+import socket
+import struct
+
+# Constants from linux/input-event-codes.h
+EV_KEY = 0x01
+KEY_SCROLLLOCK = 70
+KEY_Z = 44
+BTN_LEFT = 0x110
+BTN_RIGHT = 0x111
+
+# Format: 2x int64 (q), 2x uint16 (H), 1x int32 (i)
+# Total size: 8 + 8 + 2 + 2 + 4 = 24 bytes
+WIRE_EVENT_FORMAT = "<qqHHi"
+EVENT_SIZE = struct.calcsize(WIRE_EVENT_FORMAT)
 
 
 def find_keyboards() -> list[InputDevice]:
@@ -194,16 +210,13 @@ class AutoCorrect:
     self.meta_held: bool = False # Windows/Super key
     self.capslock_on: bool = False
 
-  def handle_event(self, event, ui: UInput):
+  def handle_event(self, ev_type, key, action, ui: UInput):
     """
     Processes event and returns True if the key was 'swallowed' or modified.
     Otherwise returns False so the caller can pass the original event through.
     """
-    if event.type != ecodes.EV_KEY:
+    if ev_type != ecodes.EV_KEY:
       return False
-
-    key = event.code
-    action = event.value # 0=up, 1=down, 2=hold
 
     # Modifier Tracking
     if key in (ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT):
@@ -326,32 +339,30 @@ class AutoCorrect:
           ui.write(ecodes.EV_KEY, ecodes.KEY_LEFTSHIFT, 0)
         return
 
-async def monitor_device(dev: InputDevice, ac: AutoCorrect):
-  # Create virtual device
-  ui = UInput.from_device(dev, name="Autocorrect-Virtual")
 
-  # IMPORTANT: Grab device to block raw input
-  dev.grab()
-  logging.info(f"Blocking raw input from: {dev.name}")
+# async def monitor_device(dev: InputDevice, ac: AutoCorrect):
+#   # Create virtual device
+#   ui = UInput.from_device(dev, name="Autocorrect-Virtual")
 
-  # Release any keys that were already held when we grabbed the device.
-  # Without this, the receiving application sees a key-down it sent before
-  # the grab but never receives the matching key-up, leaving the key stuck.
-  held = dev.active_keys()
-  if held:
-    logging.debug("Releasing %d key(s) held at grab time: %s", len(held), held)
-    for key_code in held:
-      ui.write(ecodes.EV_KEY, key_code, 0)
-    ui.syn()
+#   # IMPORTANT: Grab device to block raw input
+#   dev.grab()
+#   logging.info(f"Blocking raw input from: {dev.name}")
 
-  try:
-    async for event in dev.async_read_loop():
-      swallowed = ac.handle_event(event, ui)
-      if not swallowed:
-        ui.write_event(event)
-        ui.syn()
-  finally:
-    dev.ungrab()
+#   # Release any keys that were already held when we grabbed the device.
+#   # Without this, the receiving application sees a key-down it sent before
+#   # the grab but never receives the matching key-up, leaving the key stuck.
+#   held = dev.active_keys()
+#   if held:
+#     logging.debug("Releasing %d key(s) held at grab time: %s", len(held), held)
+#     for key_code in held:
+#       ui.write(ecodes.EV_KEY, key_code, 0)
+#     ui.syn()
+
+#   try:
+#     async for event in dev.async_read_loop():
+
+#   finally:
+#     dev.ungrab()
 
 
 async def main_loop(
@@ -370,54 +381,83 @@ async def main_loop(
     corrections = json.load(f)
   logging.info("Loaded %d corrections from %s", len(corrections), corrections_path)
 
-  keyboards = find_keyboards()
+  # keyboards = find_keyboards()
   ac = AutoCorrect(corrections)
   tasks = []
 
-  for dev in keyboards:
-    name_lower = dev.name.lower()
-    if include_list:
-      # Check if device matches any 'include' string
-      if not any(inc.lower() in name_lower for inc in include_list):
-        continue
-    else:
-      # Default behavior + Exclude list logic
+  # for dev in keyboards:
+  #   name_lower = dev.name.lower()
+  #   if include_list:
+  #     # Check if device matches any 'include' string
+  #     if not any(inc.lower() in name_lower for inc in include_list):
+  #       continue
+  #   else:
+  #     # Default behavior + Exclude list logic
 
-      # Default: Skip virtual devices to prevent feedback loops
-      default_skip = ["virtual", "ydotool", "keyd", "autocorrect"]
-      if any(x in name_lower for x in default_skip):
-        continue
+  #     # Default: Skip virtual devices to prevent feedback loops
+  #     default_skip = ["virtual", "ydotool", "keyd", "autocorrect"]
+  #     if any(x in name_lower for x in default_skip):
+  #       continue
 
-      # User-defined exclusion
-      if exclude_list and any(exc.lower() in name_lower for exc in exclude_list):
-        continue
-    # 1. Skip virtual devices to prevent feedback loops
-    name_lower = dev.name.lower()
-    if any(x in name_lower for x in ["virtual", "ydotool", "keyd", "autocorrect"]):
-      continue
+  #     # User-defined exclusion
+  #     if exclude_list and any(exc.lower() in name_lower for exc in exclude_list):
+  #       continue
+  #   # 1. Skip virtual devices to prevent feedback loops
+  #   name_lower = dev.name.lower()
+  #   if any(x in name_lower for x in ["virtual", "ydotool", "keyd", "autocorrect"]):
+  #     continue
 
-    try:
-      # 2. Test the grab immediately.
-      # If keyd or another daemon has it, this will trigger the OSError.
-      dev.grab()
-      # If we got here, we successfully grabbed it.
-      # We ungrab briefly so the async monitor can manage it.
-      dev.ungrab()
+  #   try:
+  #     # 2. Test the grab immediately.
+  #     # If keyd or another daemon has it, this will trigger the OSError.
+  #     dev.grab()
+  #     # If we got here, we successfully grabbed it.
+  #     # We ungrab briefly so the async monitor can manage it.
+  #     dev.ungrab()
 
-      logging.info(f"Adding task for: {dev.name}")
-      tasks.append(monitor_device(dev, ac))
+  #     logging.info(f"Adding task for: {dev.name}")
+  #     tasks.append(monitor_device(dev, ac))
 
-    except OSError as e:
-      if e.errno == 16:
-        logging.warning(
-          f"Skipping {dev.name}: Device busy (likely grabbed by keyd)"
-        )
-      else:
-        logging.error(f"Failed to access {dev.name}: {e}")
+  #   except OSError as e:
+  #     if e.errno == 16:
+  #       logging.warning(
+  #         f"Skipping {dev.name}: Device busy (likely grabbed by keyd)"
+  #       )
+  #     else:
+  #       logging.error(f"Failed to access {dev.name}: {e}")
+  client: socket.socket | None = None
+  all_keys: list[int] = [
+    k for k, v in ecodes.keys.items() if isinstance(k, int) and k < ecodes.KEY_MAX
+  ]
 
-  if not tasks:
-    logging.error("No accessible physical keyboards found.")
-    return
+  # 2. Define capabilities using the full list
+  capabilities: dict[int, collections.abc.Sequence[int]] = {ecodes.EV_KEY: all_keys}
+  ui = UInput(events=capabilities, name="Autocorrect-Virtual")
+
+  try:
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    client.connect("/tmp/kbd_manager.sock")
+    client.sendall(b"FILTER\n")
+
+    while True:
+      data = client.recv(EVENT_SIZE)
+      if len(data) < EVENT_SIZE:
+        break
+
+      # Unpack the Go struct
+      # sec, usec, type, code, value
+      _, _, ev_type, ev_code, ev_value = struct.unpack(WIRE_EVENT_FORMAT, data)
+      should_block = ac.handle_event(ev_type, ev_code, ev_value, ui)
+      client.sendall(b"1" if should_block else b"0")
+
+  except Exception as e:
+    print(f"Connection error: {e}")
+  finally:
+    if client:
+      client.close()
+  # if not tasks:
+  #   logging.error("No accessible physical keyboards found.")
+  #   return
 
   await asyncio.gather(*tasks)
 
@@ -454,16 +494,16 @@ if __name__ == "__main__":
     default="INFO",
     choices=["DEBUG", "INFO", "WARNING", "ERROR"],
   )
-  _ = parser.add_argument(
-    "--include",
-    nargs="+",
-    help="Only use devices that contain these strings in their name (case-insensitive).",
-  )
-  _ = parser.add_argument(
-    "--exclude",
-    nargs="+",
-    help="Ignore devices that contain these strings in their name.",
-  )
+  # _ = parser.add_argument(
+  #   "--include",
+  #   nargs="+",
+  #   help="Only use devices that contain these strings in their name (case-insensitive).",
+  # )
+  # _ = parser.add_argument(
+  #   "--exclude",
+  #   nargs="+",
+  #   help="Ignore devices that contain these strings in their name.",
+  # )
   args = parser.parse_args()
 
   logging.basicConfig(
@@ -473,6 +513,6 @@ if __name__ == "__main__":
   )
 
   try:
-    asyncio.run(main_loop(args.corrections, args.include, args.exclude))
+    asyncio.run(main_loop(args.corrections))
   except KeyboardInterrupt:
     logging.info("Stopped.")
