@@ -425,7 +425,6 @@ async def main_loop(
   #       )
   #     else:
   #       logging.error(f"Failed to access {dev.name}: {e}")
-  client: socket.socket | None = None
   all_keys: list[int] = [
     k for k, v in ecodes.keys.items() if isinstance(k, int) and k < ecodes.KEY_MAX
   ]
@@ -434,32 +433,43 @@ async def main_loop(
   capabilities: dict[int, collections.abc.Sequence[int]] = {ecodes.EV_KEY: all_keys}
   ui = UInput(events=capabilities, name="Autocorrect-Virtual")
 
-  try:
-    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.connect("/tmp/kbd_manager.sock")
-    client.sendall(b"FILTER\n")
+  RECONNECT_DELAY = 3 # seconds between reconnect attempts
 
-    while True:
-      data = client.recv(EVENT_SIZE)
-      if len(data) < EVENT_SIZE:
-        break
+  while True:
+    client: socket.socket | None = None
+    try:
+      client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      client.connect("/tmp/kbd_manager.sock")
+      client.sendall(b"FILTER\n")
+      logging.info("Connected to input-manager")
 
-      # Unpack the Go struct
-      # sec, usec, type, code, value
-      _, _, ev_type, ev_code, ev_value = struct.unpack(WIRE_EVENT_FORMAT, data)
-      should_block = ac.handle_event(ev_type, ev_code, ev_value, ui)
-      client.sendall(b"1" if should_block else b"0")
+      while True:
+        data = client.recv(EVENT_SIZE)
+        if len(data) < EVENT_SIZE:
+          logging.warning(
+            "Connection closed by input-manager, reconnecting in %ds...",
+            RECONNECT_DELAY,
+          )
+          break
 
-  except Exception as e:
-    print(f"Connection error: {e}")
-  finally:
-    if client:
-      client.close()
-  # if not tasks:
-  #   logging.error("No accessible physical keyboards found.")
-  #   return
+        # Unpack the Go struct: sec, usec, type, code, value
+        _, _, ev_type, ev_code, ev_value = struct.unpack(
+          WIRE_EVENT_FORMAT, data
+        )
+        should_block = ac.handle_event(ev_type, ev_code, ev_value, ui)
+        client.sendall(b"1" if should_block else b"0")
 
-  await asyncio.gather(*tasks)
+    except Exception as e:
+      logging.warning(
+        "Connection error: %s — reconnecting in %ds...", e, RECONNECT_DELAY
+      )
+    finally:
+      if client:
+        client.close()
+
+    import time
+
+    time.sleep(RECONNECT_DELAY)
 
 
 # ---------------------------------------------------------------------------
