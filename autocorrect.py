@@ -210,6 +210,14 @@ class AutoCorrect:
     self.meta_held: bool = False # Windows/Super key
     self.capslock_on: bool = False
 
+  def reset_modifiers(self):
+    """Reset modifier state — call on reconnect to avoid stuck keys."""
+    self.shift_held = False
+    self.ctrl_held = False
+    self.alt_held = False
+    self.meta_held = False
+    # capslock_on intentionally kept — it persists across reconnects
+
   def handle_event(self, ev_type, key, action, ui: UInput):
     """
     Processes event and returns True if the key was 'swallowed' or modified.
@@ -441,6 +449,7 @@ async def main_loop(
       client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
       client.connect("/tmp/kbd_manager.sock")
       client.sendall(b"FILTER\n")
+      ac.reset_modifiers()
       logging.info("Connected to input-manager")
 
       while True:
