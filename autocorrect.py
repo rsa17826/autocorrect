@@ -511,6 +511,7 @@ if __name__ == "__main__":
     "--capsHasBeenDisabled",
     dest="capsHasBeenDisabled", # This keeps your variable name the same in code
     action="store_true", # Sets it to True if the flag is used
+    help="caps is not used to toggle the case state so don't detect use of the capslock button as if it does that",
   )
   _ = parser.add_argument(
     "--log-level",
