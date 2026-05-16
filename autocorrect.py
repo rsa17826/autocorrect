@@ -199,10 +199,11 @@ def find_keyboards() -> list[InputDevice]:
 class AutoCorrect:
   BUFFER_MAX = 150
 
-  def __init__(self, corrections: dict[str, str]):
+  def __init__(self, corrections: dict[str, str], capsHasBeenDisabled: bool = False):
     self.corrections: dict[str, str] = dict(
       sorted(corrections.items(), key=lambda kv: -len(kv[0]))
     )
+    self.capsHasBeenDisabled: bool = capsHasBeenDisabled
     self.buffer: str = ""
     self.shift_held: bool = False
     self.ctrl_held: bool = False
@@ -244,7 +245,7 @@ class AutoCorrect:
       self.meta_held = action != 0
       return False
 
-    if key == ecodes.KEY_CAPSLOCK and action == 1:
+    if key == ecodes.KEY_CAPSLOCK and action == 1 and not self.capsHasBeenDisabled:
       self.capslock_on = not self.capslock_on
       return False
 
@@ -373,9 +374,7 @@ class AutoCorrect:
 #     dev.ungrab()
 
 
-async def main_loop(
-  corrections_path: str, include_list: list = None, exclude_list: list = None
-) -> None:
+async def main_loop(corrections_path: str, capsHasBeenDisabled: bool = False) -> None:
   # Load corrections
   default_config_path = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "corrections.json"
@@ -390,7 +389,7 @@ async def main_loop(
   logging.info("Loaded %d corrections from %s", len(corrections), corrections_path)
 
   # keyboards = find_keyboards()
-  ac = AutoCorrect(corrections)
+  ac = AutoCorrect(corrections, capsHasBeenDisabled)
   tasks = []
 
   # for dev in keyboards:
@@ -509,6 +508,11 @@ if __name__ == "__main__":
     help="Path to corrections JSON file (default: corrections.json next to this script)",
   )
   _ = parser.add_argument(
+    "--capsHasBeenDisabled",
+    dest="capsHasBeenDisabled", # This keeps your variable name the same in code
+    action="store_true", # Sets it to True if the flag is used
+  )
+  _ = parser.add_argument(
     "--log-level",
     default="INFO",
     choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -532,6 +536,6 @@ if __name__ == "__main__":
   )
 
   try:
-    asyncio.run(main_loop(args.corrections))
+    asyncio.run(main_loop(args.corrections, args.capsHasBeenDisabled))
   except KeyboardInterrupt:
     logging.info("Stopped.")
