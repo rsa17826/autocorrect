@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"unicode"
 
 	argparse "github.com/rsa17826/go-arg-lib"
 	"github.com/rsa17826/go-input-lib"
@@ -147,6 +148,12 @@ var RESET_KEYS = []int{
 
 type CorrectionsConfig map[string]string
 
+var shiftHeld bool
+var ctrlHeld bool
+var altHeld bool
+var metaHeld bool
+var capslockOn bool
+
 func main() {
 	var capsHasBeenDisabled bool
 	var correctionsPath string
@@ -197,11 +204,6 @@ func main() {
 				break
 			}
 
-			var shiftHeld bool
-			var ctrlHeld bool
-			var altHeld bool
-			var metaHeld bool
-			var capslockOn bool
 			const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
 			const BUFFER_MAX int = 150
 			buffer := make([]byte, 0, 150)
@@ -248,37 +250,61 @@ func main() {
 								buffer = make([]byte, 0)
 								return false
 							}
+
 							var table map[int]byte
 							if shiftHeld != capslockOn {
 								table = SHIFTED
 							} else {
 								table = NORMAL
 							}
+
+							char := table[int(ev.Code)]
+
+							// strings.Contains needs a string, so we convert our single byte 'char' to string
 							if strings.Contains(TRIGGER_CHARS, string(char)) {
 								for wrong, right := range corrections {
-									if bytes.endsWith(buffer, wrong) {
+									// Convert the 'wrong' string to []byte to use bytes.HasSuffix
+									if bytes.HasSuffix(buffer, []byte(wrong)) {
 										isStartOfWord := false
-										if len(buffer) == len(wrong) {
+										wrongLen := len(wrong)
+										bufLen := len(buffer)
+
+										if bufLen == wrongLen {
 											isStartOfWord = true
 										} else {
-											prev := buffer[-(len(wrong))-1]
-											curr := buffer[-(len(wrong))]
-											next := buffer[-(len(wrong))+1]
-											if !strings.isalpha(prev) {
+											// Calculate correct positive indices from the back of the buffer
+											prev := buffer[bufLen-wrongLen-1]
+											curr := buffer[bufLen-wrongLen]
+
+											// Safety check: make sure next doesn't go out of bounds
+											var next byte
+											if bufLen-wrongLen+1 < bufLen {
+												next = buffer[bufLen-wrongLen+1]
+											}
+
+											// 1. Check if previous character is not a letter
+											if !unicode.IsLetter(rune(prev)) {
 												isStartOfWord = true
 											}
 											// 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
-											if strings.islower(prev) || strings.isupper(curr) {
+											if unicode.IsLower(rune(prev)) || unicode.IsUpper(rune(curr)) {
 												isStartOfWord = true
 											}
-											// 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa in HTMLParser)
-											if strings.isupper(prev) && strings.isupper(curr) && strings.islower(next) {
+											// 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa)
+											if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
 												isStartOfWord = true
 											}
 										}
+
 										if isStartOfWord {
-											apply_correction(ui, wrong, right, key)
-											buffer = buffer[:-(len(wrong)+1)] + right + table[int(ev.Code)]
+											apply_correction(wrong, right, rune(char))
+
+											// Safely reconstruct the buffer using append()
+											// Slice out the 'wrong' word, then append 'right' (cast to bytes), then append the new 'char'
+											buffer = buffer[:bufLen-wrongLen]
+											buffer = append(buffer, []byte(right)...)
+											buffer = append(buffer, char)
+
 											if len(buffer) > BUFFER_MAX {
 												buffer = buffer[len(buffer)-BUFFER_MAX:]
 											}
@@ -287,7 +313,7 @@ func main() {
 									}
 								}
 							}
-							char := table[int(ev.Code)]
+
 							buffer = append(buffer, char)
 							if len(buffer) > BUFFER_MAX {
 								buffer = buffer[len(buffer)-BUFFER_MAX:]
@@ -311,7 +337,88 @@ func main() {
 	}()
 }
 
-func send() {
+func apply_correction(wrong, right string, triggerChar rune) {
+	events := make([]WireEvent, 0)
+	var lastUsedShift bool = shiftHeld
+	for range wrong {
+		events = append(events, []WireEvent{
+			{
+				Type:  input.EV_KEY,
+				Code:  input.KEY_BACKSPACE,
+				Value: int32(1),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  input.KEY_BACKSPACE,
+				Value: int32(0),
+			},
+		}...)
+	}
+	for _, char := range right {
+		keyInfo := input.CharKeyMap[char]
+		if keyInfo.Shift != lastUsedShift {
+			if keyInfo.Shift {
+				events = append(events, []WireEvent{
+					{
+						Type:  input.EV_KEY,
+						Code:  keyInfo.Code,
+						Value: int32(1),
+					},
+				}...)
+			} else {
+				events = append(events, []WireEvent{
+					{
+						Type:  input.EV_KEY,
+						Code:  keyInfo.Code,
+						Value: int32(0),
+					},
+				}...)
+			}
+		}
+		events = append(events, []WireEvent{
+			{
+				Type:  input.EV_KEY,
+				Code:  keyInfo.Code,
+				Value: int32(1),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  keyInfo.Code,
+				Value: int32(0),
+			},
+		}...)
+	}
+	if lastUsedShift != shiftHeld {
+		if shiftHeld {
+			events = append(events, []WireEvent{
+				{
+					Type:  input.EV_KEY,
+					Code:  input.KEY_LEFTSHIFT,
+					Value: int32(1),
+				},
+			}...)
+		} else {
+			events = append(events, []WireEvent{
+				{
+					Type:  input.EV_KEY,
+					Code:  input.KEY_LEFTSHIFT,
+					Value: int32(0),
+				},
+			}...)
+		}
+		events = append(events, []WireEvent{
+			{
+				Type:  input.EV_KEY,
+				Code:  input.CharKeyMap[triggerChar].Code,
+				Value: int32(1),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  input.CharKeyMap[triggerChar].Code,
+				Value: int32(0),
+			},
+		}...)
+	}
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
 	if err != nil {
 		panic(err)
@@ -320,24 +427,40 @@ func send() {
 
 	// Initialize context registration handshake
 	fmt.Fprint(conn, "INJECT\n")
-
-	// // Frame an injection event packet (e.g., Force Mouse right relative +100 units)
-	// if x != 0 {
-	// 	stroke := WireEvent{
-	// 		Type:  input.EV_REL, // EV_REL
-	// 		Code:  input.REL_X,  // REL_X
-	// 		Value: int32(x),     // Move right 100 pixels
-	// 	}
-
-	// 	binary.Write(conn, binary.LittleEndian, stroke)
-	// }
-	// if y != 0 {
-	// 	stroke := WireEvent{
-	// 		Type:  input.EV_REL, // EV_REL
-	// 		Code:  input.REL_Y,  // REL_X
-	// 		Value: int32(y),     // Move right 100 pixels
-	// 	}
-
-	// 	binary.Write(conn, binary.LittleEndian, stroke)
-	// }
+	for stroke := range events {
+		binary.Write(conn, binary.LittleEndian, stroke)
+	}
 }
+
+// return correct shift side to pressed if required
+
+// func send() {
+// 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	defer conn.Close()
+
+// 	// Initialize context registration handshake
+// 	fmt.Fprint(conn, "INJECT\n")
+
+// 	// // Frame an injection event packet (e.g., Force Mouse right relative +100 units)
+// 	// if x != 0 {
+// 	// 	stroke := WireEvent{
+// 	// 		Type:  input.EV_REL, // EV_REL
+// 	// 		Code:  input.REL_X,  // REL_X
+// 	// 		Value: int32(x),     // Move right 100 pixels
+// 	// 	}
+
+// 	// 	binary.Write(conn, binary.LittleEndian, stroke)
+// 	// }
+// 	// if y != 0 {
+// 	// 	stroke := WireEvent{
+// 	// 		Type:  input.EV_REL, // EV_REL
+// 	// 		Code:  input.REL_Y,  // REL_X
+// 	// 		Value: int32(y),     // Move right 100 pixels
+// 	// 	}
+
+// 	// 	binary.Write(conn, binary.LittleEndian, stroke)
+// 	// }
+// }
