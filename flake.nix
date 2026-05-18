@@ -1,7 +1,13 @@
 {
+  description = "An input manager to prevent having to chain devices and allow wasily unlocking keyboard";
+
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    nixpkgs = {
+      url = "github:NixOS/nixpkgs/nixos-unstable";
+    };
+    flake-utils = {
+      url = "github:numtide/flake-utils";
+    };
   };
 
   outputs =
@@ -9,44 +15,31 @@
       self,
       nixpkgs,
       flake-utils,
-      ...
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-        };
-
-        pythonEnv = pkgs.python313.withPackages (
-          ps: with ps; [
-            evdev
-          ]
-        );
-        myApp = pkgs.writeShellScriptBin "autocorrect" ''
-          export PATH="${pkgs.lib.makeBinPath [ pkgs.wtype ]}:$PATH"
-          exec ${pythonEnv}/bin/python ${
-            (pkgs.linkFarm "autocorrect-assets" [
-              {
-                name = "corrections.json";
-                path = ./corrections.json;
-              }
-              {
-                name = "autocorrect.py";
-                path = ./autocorrect.py;
-              }
-            ])
-          }/autocorrect.py "$@"
-        '';
+        pkgs = import nixpkgs { inherit system; };
       in
       {
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            pythonEnv
-            wtype
-          ];
+        packages = {
+          # The actual package
+          default = pkgs.buildGoModule {
+            pname = "autocorrect";
+            version = "3";
+            src = ./.;
+            vendorHash = "sha256-SV7TFrNKWnKZOTDKzNkLag5WAi5wNoeaWEBd1wjrt9o=";
+          };
         };
-        packages.default = myApp;
+        devShells = {
+          # Development environment
+          default = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              go
+              gopls
+            ];
+          };
+        };
       }
     );
 }
