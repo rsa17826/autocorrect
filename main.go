@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -150,6 +151,8 @@ var RESET_KEYS = []int{
 
 type CorrectionsConfig map[string]string
 
+var correcting atomic.Int32
+
 var shiftHeld bool
 var ctrlHeld bool
 var altHeld bool
@@ -286,6 +289,7 @@ func main() {
 
 										if isStartOfWord {
 											modify = true
+											correcting.Store(1)
 											_, err = conn.Write([]byte{1})
 											if err != nil {
 												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
@@ -315,8 +319,8 @@ func main() {
 							}
 						}
 					}
+					println(fmt.Sprintf("[%s]", buffer), len(corrections))
 				}
-				// println(fmt.Sprintf("[%s]", buffer), len(corrections))
 			}
 		}
 
@@ -325,7 +329,11 @@ func main() {
 			println(modify, "modify")
 		}
 		if !modify {
-			_, err = conn.Write([]byte{0})
+			resp := byte(0)
+			if correcting.Load() == 1 && ev.Value != 0 {
+				resp = 1 // block ALL events while correction is in flight
+			}
+			_, err = conn.Write([]byte{resp})
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
@@ -335,7 +343,20 @@ func main() {
 }
 
 func apply_correction(wrong, right string, triggerChar rune) {
+	correcting.Store(1)
+	defer correcting.Store(0)
 	events := make([]WireEvent, 0)
+	// sending up just before the down doesn't appear to work but putting it here where there is a different key pressed does appear to work eg t up \b t down works but t up t down doesn't
+	for _, char := range right {
+		keyInfo := input.CharKeyMap[char]
+		events = append(events, []WireEvent{
+			{
+				Type:  input.EV_KEY,
+				Code:  keyInfo.Code,
+				Value: int32(0),
+			},
+		}...)
+	}
 	var lastUsedShift bool = shiftHeld
 	for range wrong {
 		events = append(events, []WireEvent{
@@ -352,9 +373,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 		}...)
 	}
 	events = append(events, []WireEvent{
-		{
-			Type: input.EV_SYN,
-		},
+		{},
 	}...)
 	for _, char := range right {
 		keyInfo := input.CharKeyMap[char]
@@ -366,9 +385,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(1),
 					},
-					{
-						Type: input.EV_SYN,
-					},
+					{},
 				}...)
 			} else {
 				events = append(events, []WireEvent{
@@ -377,9 +394,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(0),
 					},
-					{
-						Type: input.EV_SYN,
-					},
+					{},
 				}...)
 			}
 			lastUsedShift = keyInfo.Shift
@@ -417,9 +432,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 		}
 	}
 	events = append(events, []WireEvent{
-		{
-			Type: input.EV_SYN,
-		},
+		{},
 		{
 			Type:  input.EV_KEY,
 			Code:  input.CharKeyMap[triggerChar].Code,
@@ -430,9 +443,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 			Code:  input.CharKeyMap[triggerChar].Code,
 			Value: int32(0),
 		},
-		{
-			Type: input.EV_SYN,
-		},
+		{},
 	}...)
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
 	if err != nil {
@@ -444,6 +455,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 	fmt.Fprint(conn, "INJECT\n")
 	for i, stroke := range events {
 		binary.Write(conn, binary.LittleEndian, stroke)
+		binary.Write(conn, binary.LittleEndian, WireEvent{})
 		println(i%10 == 0)
 		if i != 0 && i%10 == 0 {
 			time.Sleep(1 * time.Millisecond)
