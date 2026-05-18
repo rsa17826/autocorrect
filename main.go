@@ -346,17 +346,6 @@ func apply_correction(wrong, right string, triggerChar rune) {
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]WireEvent, 0)
-	// sending up just before the down doesn't appear to work but putting it here where there is a different key pressed does appear to work eg t up \b t down works but t up t down doesn't
-	for _, char := range right {
-		keyInfo := input.CharKeyMap[char]
-		events = append(events, []WireEvent{
-			{
-				Type:  input.EV_KEY,
-				Code:  keyInfo.Code,
-				Value: int32(0),
-			},
-		}...)
-	}
 	var lastUsedShift bool = shiftHeld
 	for range wrong {
 		events = append(events, []WireEvent{
@@ -403,6 +392,11 @@ func apply_correction(wrong, right string, triggerChar rune) {
 			{
 				Type:  input.EV_KEY,
 				Code:  keyInfo.Code,
+				Value: int32(0),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  keyInfo.Code,
 				Value: int32(1),
 			},
 			{
@@ -433,6 +427,11 @@ func apply_correction(wrong, right string, triggerChar rune) {
 	}
 	events = append(events, []WireEvent{
 		{},
+		{
+			Type:  input.EV_KEY,
+			Code:  input.CharKeyMap[triggerChar].Code,
+			Value: int32(0),
+		},
 		{
 			Type:  input.EV_KEY,
 			Code:  input.CharKeyMap[triggerChar].Code,
