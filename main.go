@@ -233,20 +233,17 @@ func main() {
 				if !capsHasBeenDisabled && isKeyPress {
 					capslockOn = !capslockOn
 				}
-
-			case input.KEY_BACKSPACE:
-				if isKeyPress && len(buffer) > 0 {
-					buffer = buffer[:len(buffer)-1]
-				}
-
 			default:
 				// FIX 2: Only collect and alter alphanumeric strings if it's a Down/Repeat stroke
 				if isKeyPress && ev.Code <= 247 {
-					println(fmt.Sprintf("[%d/%d]", len(buffer), cap(buffer)), len(corrections))
-
 					if ctrlHeld || altHeld || metaHeld {
 						buffer = buffer[:0]
 					} else {
+						if ev.Code == input.KEY_BACKSPACE {
+							if len(buffer) > 0 {
+								buffer = buffer[:len(buffer)-1]
+							}
+						}
 						var table map[int]byte
 						if shiftHeld != capslockOn {
 							table = SHIFTED
@@ -312,6 +309,7 @@ func main() {
 						}
 					}
 				}
+				println(fmt.Sprintf("[%s]", buffer), len(corrections))
 			}
 		}
 
@@ -345,6 +343,11 @@ func apply_correction(wrong, right string, triggerChar rune) {
 			},
 		}...)
 	}
+	events = append(events, []WireEvent{
+		{
+			Type: input.EV_SYN,
+		},
+	}...)
 	for _, char := range right {
 		keyInfo := input.CharKeyMap[char]
 		if keyInfo.Shift != lastUsedShift {
@@ -355,6 +358,9 @@ func apply_correction(wrong, right string, triggerChar rune) {
 						Code:  keyInfo.Code,
 						Value: int32(1),
 					},
+					{
+						Type: input.EV_SYN,
+					},
 				}...)
 			} else {
 				events = append(events, []WireEvent{
@@ -362,6 +368,9 @@ func apply_correction(wrong, right string, triggerChar rune) {
 						Type:  input.EV_KEY,
 						Code:  keyInfo.Code,
 						Value: int32(0),
+					},
+					{
+						Type: input.EV_SYN,
 					},
 				}...)
 			}
@@ -400,6 +409,9 @@ func apply_correction(wrong, right string, triggerChar rune) {
 	}
 	events = append(events, []WireEvent{
 		{
+			Type: input.EV_SYN,
+		},
+		{
 			Type:  input.EV_KEY,
 			Code:  input.CharKeyMap[triggerChar].Code,
 			Value: int32(1),
@@ -408,6 +420,9 @@ func apply_correction(wrong, right string, triggerChar rune) {
 			Type:  input.EV_KEY,
 			Code:  input.CharKeyMap[triggerChar].Code,
 			Value: int32(0),
+		},
+		{
+			Type: input.EV_SYN,
 		},
 	}...)
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
