@@ -247,11 +247,14 @@ func main() {
 					}
 				default:
 					{
+						// 1. Ignore mouse buttons and scrolling (Linux keycodes above 247 are mouse/misc)
 						if ev.Code > 247 {
 							return false
 						}
+
+						// 2. Clear buffer properly on mod clicks without destroying capacity [0/150]
 						if ctrlHeld || altHeld || metaHeld {
-							buffer = buffer[:0]
+							buffer = buffer[:0] // Resets length to 0 but retains the 150 capacity!
 							return false
 						}
 
@@ -262,6 +265,7 @@ func main() {
 							table = NORMAL
 						}
 
+						// Pull the mapped character
 						char, exists := table[int(ev.Code)]
 						if !exists || char == 0 {
 							// If the key pressed isn't in our alphabet maps, skip it
@@ -308,7 +312,6 @@ func main() {
 										apply_correction(wrong, right, rune(char))
 
 										// Safely reconstruct the buffer using append()
-										// Slice out the 'wrong' word, then append 'right' (cast to bytes), then append the new 'char'
 										buffer = buffer[:bufLen-wrongLen]
 										buffer = append(buffer, []byte(right)...)
 										buffer = append(buffer, char)
