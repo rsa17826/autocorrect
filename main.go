@@ -6,11 +6,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
+	"strings"
 
 	argparse "github.com/rsa17826/go-arg-lib"
 	"github.com/rsa17826/go-input-lib"
+	"github.com/segmentio/encoding/json"
 )
 
 type WireEvent struct {
@@ -129,6 +132,20 @@ var SHIFTED = map[int]byte{
 	input.KEY_ENTER:      '\n',
 	input.KEY_KPENTER:    '\n',
 }
+var RESET_KEYS = []int{
+	input.KEY_LEFT,
+	input.KEY_RIGHT,
+	input.KEY_UP,
+	input.KEY_DOWN,
+	input.KEY_HOME,
+	input.KEY_END,
+	input.KEY_PAGEUP,
+	input.KEY_PAGEDOWN,
+	input.KEY_DELETE,
+	input.KEY_ESC,
+}
+
+type CorrectionsConfig map[string]string
 
 func main() {
 	var capsHasBeenDisabled bool
@@ -140,6 +157,20 @@ func main() {
 	if _, err := os.Stat(correctionsPath); os.IsNotExist(err) {
 		_ = os.WriteFile(correctionsPath, defaultConfigFileBytes, 0644)
 	}
+
+	// 2. Open the file first (this returns an *os.File, which implements io.Reader)
+	byteValue, err := os.ReadFile(correctionsPath)
+	if err != nil {
+		log.Fatalf("Failed to read file: %v", err)
+	}
+
+	// 4. Parse (Unmarshal) the JSON into a Go struct or map
+	var corrections CorrectionsConfig
+	err = json.Unmarshal(byteValue, &corrections)
+	if err != nil {
+		log.Fatalf("Failed to parse JSON: %v", err)
+	}
+
 	go func() {
 		conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
 		if err != nil {
@@ -171,6 +202,7 @@ func main() {
 			var altHeld bool
 			var metaHeld bool
 			var capslockOn bool
+			const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
 			const BUFFER_MAX int = 150
 			buffer := make([]byte, 0, 150)
 			var modify = func() bool {
@@ -212,11 +244,48 @@ func main() {
 						}
 					default:
 						{
+							if ctrlHeld || altHeld || metaHeld {
+								buffer = make([]byte, 0)
+								return false
+							}
 							var table map[int]byte
 							if shiftHeld != capslockOn {
 								table = SHIFTED
 							} else {
 								table = NORMAL
+							}
+							if strings.Contains(TRIGGER_CHARS, string(char)) {
+								for wrong, right := range corrections {
+									if bytes.endsWith(buffer, wrong) {
+										isStartOfWord := false
+										if len(buffer) == len(wrong) {
+											isStartOfWord = true
+										} else {
+											prev := buffer[-(len(wrong))-1]
+											curr := buffer[-(len(wrong))]
+											next := buffer[-(len(wrong))+1]
+											if !strings.isalpha(prev) {
+												isStartOfWord = true
+											}
+											// 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
+											if strings.islower(prev) || strings.isupper(curr) {
+												isStartOfWord = true
+											}
+											// 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa in HTMLParser)
+											if strings.isupper(prev) && strings.isupper(curr) && strings.islower(next) {
+												isStartOfWord = true
+											}
+										}
+										if isStartOfWord {
+											apply_correction(ui, wrong, right, key)
+											buffer = buffer[:-(len(wrong)+1)] + right + table[int(ev.Code)]
+											if len(buffer) > BUFFER_MAX {
+												buffer = buffer[len(buffer)-BUFFER_MAX:]
+											}
+											return true
+										}
+									}
+								}
 							}
 							char := table[int(ev.Code)]
 							buffer = append(buffer, char)
