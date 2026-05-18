@@ -207,57 +207,46 @@ func main() {
 
 		const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
 		const BUFFER_MAX int = 150
-		var modify = func() bool {
-			if ev.Type == input.EV_KEY {
-				println(buffer, len(corrections))
-				switch ev.Code {
-				case input.KEY_LEFTSHIFT, input.KEY_RIGHTSHIFT:
-					{
-						shiftHeld = ev.Type != 0
-						return false
-					}
-				case input.KEY_LEFTCTRL, input.KEY_RIGHTCTRL:
-					{
-						ctrlHeld = ev.Type != 0
-						return false
-					}
-				case input.KEY_LEFTALT, input.KEY_RIGHTALT:
-					{
-						altHeld = ev.Type != 0
-						return false
-					}
-				case input.KEY_LEFTMETA, input.KEY_RIGHTMETA:
-					{
-						metaHeld = ev.Type != 0
-						return false
-					}
-				case input.KEY_CAPSLOCK:
-					{
-						if !capsHasBeenDisabled {
-							capslockOn = ev.Type != 0
-							return false
-						}
-					}
-				case input.KEY_BACKSPACE:
-					{
-						if len(buffer) > 0 {
-							buffer = buffer[:len(buffer)-1]
-						}
-						return false
-					}
-				default:
-					{
-						// 1. Ignore mouse buttons and scrolling (Linux keycodes above 247 are mouse/misc)
-						if ev.Code > 247 {
-							return false
-						}
 
-						// 2. Clear buffer properly on mod clicks without destroying capacity [0/150]
-						if ctrlHeld || altHeld || metaHeld {
-							buffer = buffer[:0] // Resets length to 0 but retains the 150 capacity!
-							return false
-						}
+		modify := false
 
+		// FIX 1: Explicitly verify this is a keyboard driver action event
+		if ev.Type == input.EV_KEY {
+			// Value == 1 is Key Press, Value == 2 is Key Repeat. Value == 0 is Key Release!
+			// We handle Modifiers on both Press AND Release, but ignore text updates on Release.
+			isKeyPress := (ev.Value == 1 || ev.Value == 2)
+
+			switch ev.Code {
+			case input.KEY_LEFTSHIFT, input.KEY_RIGHTSHIFT:
+				shiftHeld = (ev.Value != 0)
+
+			case input.KEY_LEFTCTRL, input.KEY_RIGHTCTRL:
+				ctrlHeld = (ev.Value != 0)
+
+			case input.KEY_LEFTALT, input.KEY_RIGHTALT:
+				altHeld = (ev.Value != 0)
+
+			case input.KEY_LEFTMETA, input.KEY_RIGHTMETA:
+				metaHeld = (ev.Value != 0)
+
+			case input.KEY_CAPSLOCK:
+				if !capsHasBeenDisabled && isKeyPress {
+					capslockOn = !capslockOn
+				}
+
+			case input.KEY_BACKSPACE:
+				if isKeyPress && len(buffer) > 0 {
+					buffer = buffer[:len(buffer)-1]
+				}
+
+			default:
+				// FIX 2: Only collect and alter alphanumeric strings if it's a Down/Repeat stroke
+				if isKeyPress && ev.Code <= 247 {
+					println(fmt.Sprintf("[%d/%d]", len(buffer), cap(buffer)), len(corrections))
+
+					if ctrlHeld || altHeld || metaHeld {
+						buffer = buffer[:0]
+					} else {
 						var table map[int]byte
 						if shiftHeld != capslockOn {
 							table = SHIFTED
@@ -265,76 +254,68 @@ func main() {
 							table = NORMAL
 						}
 
-						// Pull the mapped character
 						char, exists := table[int(ev.Code)]
-						if !exists || char == 0 {
-							// If the key pressed isn't in our alphabet maps, skip it
-							return false
-						}
-
-						// strings.Contains needs a string, so we convert our single byte 'char' to string
-						if strings.Contains(TRIGGER_CHARS, string(char)) {
-							for wrong, right := range corrections {
-								// Convert the 'wrong' string to []byte to use bytes.HasSuffix
-								if bytes.HasSuffix(buffer, []byte(wrong)) {
-									isStartOfWord := false
-									wrongLen := len(wrong)
-									bufLen := len(buffer)
-
-									if bufLen == wrongLen {
-										isStartOfWord = true
-									} else {
-										// Calculate correct positive indices from the back of the buffer
-										prev := buffer[bufLen-wrongLen-1]
-										curr := buffer[bufLen-wrongLen]
-
-										// Safety check: make sure next doesn't go out of bounds
-										var next byte
-										if bufLen-wrongLen+1 < bufLen {
-											next = buffer[bufLen-wrongLen+1]
-										}
-
-										// 1. Check if previous character is not a letter
-										if !unicode.IsLetter(rune(prev)) {
+						if exists && char != 0 {
+							if strings.Contains(TRIGGER_CHARS, string(char)) {
+								for wrong, right := range corrections {
+									if bytes.HasSuffix(buffer, []byte(wrong)) {
+										println("Correcting:", wrong, "->", right)
+										isStartOfWord := false
+										wrongLen := len(wrong)
+										bufLen := len(buffer)
+										println("bufLen", bufLen, wrongLen)
+										if bufLen == wrongLen {
 											isStartOfWord = true
-										}
-										// 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
-										if unicode.IsLower(rune(prev)) || unicode.IsUpper(rune(curr)) {
-											isStartOfWord = true
-										}
-										// 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa)
-										if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
-											isStartOfWord = true
-										}
-									}
+										} else {
+											prev := buffer[bufLen-wrongLen-1]
+											curr := buffer[bufLen-wrongLen]
 
-									if isStartOfWord {
-										apply_correction(wrong, right, rune(char))
+											var next byte
+											if bufLen-wrongLen+1 < bufLen {
+												next = buffer[bufLen-wrongLen+1]
+											}
 
-										// Safely reconstruct the buffer using append()
-										buffer = buffer[:bufLen-wrongLen]
-										buffer = append(buffer, []byte(right)...)
-										buffer = append(buffer, char)
-
-										if len(buffer) > BUFFER_MAX {
-											buffer = buffer[len(buffer)-BUFFER_MAX:]
+											if !unicode.IsLetter(rune(prev)) {
+												isStartOfWord = true
+											}
+											if unicode.IsLower(rune(prev)) && unicode.IsUpper(rune(curr)) {
+												isStartOfWord = true
+											}
+											if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
+												isStartOfWord = true
+											}
 										}
-										return true
+
+										if isStartOfWord {
+											apply_correction(wrong, right, rune(char))
+
+											buffer = buffer[:bufLen-wrongLen]
+											buffer = append(buffer, []byte(right)...)
+											buffer = append(buffer, char)
+
+											if len(buffer) > BUFFER_MAX {
+												buffer = buffer[len(buffer)-BUFFER_MAX:]
+											}
+											modify = true
+											break
+										}
 									}
 								}
 							}
-						}
 
-						buffer = append(buffer, char)
-						if len(buffer) > BUFFER_MAX {
-							buffer = buffer[len(buffer)-BUFFER_MAX:]
+							if !modify {
+								buffer = append(buffer, char)
+								if len(buffer) > BUFFER_MAX {
+									buffer = buffer[len(buffer)-BUFFER_MAX:]
+								}
+							}
 						}
 					}
 				}
 			}
-			return false
-		}()
-		// Response byte loop back to manager
+		}
+
+		// Response byte loop back out to manager
 		if modify {
 			_, err = conn.Write([]byte{1})
 		} else {
@@ -416,19 +397,19 @@ func apply_correction(wrong, right string, triggerChar rune) {
 				},
 			}...)
 		}
-		events = append(events, []WireEvent{
-			{
-				Type:  input.EV_KEY,
-				Code:  input.CharKeyMap[triggerChar].Code,
-				Value: int32(1),
-			},
-			{
-				Type:  input.EV_KEY,
-				Code:  input.CharKeyMap[triggerChar].Code,
-				Value: int32(0),
-			},
-		}...)
 	}
+	events = append(events, []WireEvent{
+		{
+			Type:  input.EV_KEY,
+			Code:  input.CharKeyMap[triggerChar].Code,
+			Value: int32(1),
+		},
+		{
+			Type:  input.EV_KEY,
+			Code:  input.CharKeyMap[triggerChar].Code,
+			Value: int32(0),
+		},
+	}...)
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
 	if err != nil {
 		panic(err)
