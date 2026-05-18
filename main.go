@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	argparse "github.com/rsa17826/go-arg-lib"
@@ -284,7 +285,13 @@ func main() {
 										}
 
 										if isStartOfWord {
-											apply_correction(wrong, right, rune(char))
+											modify = true
+											_, err = conn.Write([]byte{1})
+											if err != nil {
+												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+												break
+											}
+											go apply_correction(wrong, right, rune(char))
 
 											buffer = buffer[:bufLen-wrongLen]
 											buffer = append(buffer, []byte(right)...)
@@ -293,7 +300,7 @@ func main() {
 											if len(buffer) > BUFFER_MAX {
 												buffer = buffer[len(buffer)-BUFFER_MAX:]
 											}
-											modify = true
+
 											break
 										}
 									}
@@ -315,8 +322,9 @@ func main() {
 
 		// Response byte loop back out to manager
 		if modify {
-			_, err = conn.Write([]byte{1})
-		} else {
+			println(modify, "modify")
+		}
+		if !modify {
 			_, err = conn.Write([]byte{0})
 		}
 		if err != nil {
@@ -434,12 +442,12 @@ func apply_correction(wrong, right string, triggerChar rune) {
 
 	// Initialize context registration handshake
 	fmt.Fprint(conn, "INJECT\n")
-	for _, stroke := range events {
+	for i, stroke := range events {
 		binary.Write(conn, binary.LittleEndian, stroke)
-		binary.Write(conn, binary.LittleEndian, WireEvent{
-			Type: input.EV_SYN,
-		})
-		// time.Sleep(10 * time.Millisecond)
+		println(i%10 == 0)
+		if i != 0 && i%10 == 0 {
+			time.Sleep(1 * time.Millisecond)
+		}
 	}
 }
 
