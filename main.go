@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -159,7 +160,7 @@ func main() {
 	var correctionsPath string
 	argparse.ParseArgs([]argparse.ArgumentData{
 		{Keys: []string{"capsHasBeenDisabled"}, AfterCount: 0, Target: &capsHasBeenDisabled, Description: "caps is not used to toggle the case state so don't detect use of the capslock button as if it does that"},
-		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{os.Getenv("XDG_CONFIG_HOME")}},
+		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "corrections.json")}},
 	})
 	if _, err := os.Stat(correctionsPath); os.IsNotExist(err) {
 		_ = os.WriteFile(correctionsPath, defaultConfigFileBytes, 0644)
@@ -178,163 +179,169 @@ func main() {
 		log.Fatalf("Failed to parse JSON: %v", err)
 	}
 
-	go func() {
-		conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
+	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
+	if err != nil {
+		panic(err)
+	}
+	defer conn.Close()
+	fmt.Fprint(conn, "FILTER\n")
+	var ev WireEvent
+	evSize := binary.Size(ev)
+	buf := make([]byte, evSize)
+	buffer := make([]byte, 0, 150)
+
+	for {
+		_, err := io.ReadFull(conn, buf)
 		if err != nil {
-			panic(err)
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				fmt.Println("Manager closed the connection.")
+			} else {
+				fmt.Fprintf(os.Stderr, "Error reading wire event: %v\n", err)
+			}
+			break
 		}
-		defer conn.Close()
-		fmt.Fprint(conn, "FILTER\n")
-		var ev WireEvent
-		evSize := binary.Size(ev)
-		buf := make([]byte, evSize)
+		if err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &ev); err != nil {
+			fmt.Fprintf(os.Stderr, "Error decoding wire event: %v\n", err)
+			break
+		}
 
-		for {
-			_, err := io.ReadFull(conn, buf)
-			if err != nil {
-				if err == io.EOF || err == io.ErrUnexpectedEOF {
-					fmt.Println("Manager closed the connection.")
-				} else {
-					fmt.Fprintf(os.Stderr, "Error reading wire event: %v\n", err)
-				}
-				break
-			}
-			if err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &ev); err != nil {
-				fmt.Fprintf(os.Stderr, "Error decoding wire event: %v\n", err)
-				break
-			}
-
-			const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
-			const BUFFER_MAX int = 150
-			buffer := make([]byte, 0, 150)
-			var modify = func() bool {
-				if ev.Type == input.EV_KEY {
-					switch ev.Code {
-					case input.KEY_LEFTSHIFT, input.KEY_RIGHTSHIFT:
-						{
-							shiftHeld = ev.Type != 0
+		const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
+		const BUFFER_MAX int = 150
+		var modify = func() bool {
+			if ev.Type == input.EV_KEY {
+				println(buffer, len(corrections))
+				switch ev.Code {
+				case input.KEY_LEFTSHIFT, input.KEY_RIGHTSHIFT:
+					{
+						shiftHeld = ev.Type != 0
+						return false
+					}
+				case input.KEY_LEFTCTRL, input.KEY_RIGHTCTRL:
+					{
+						ctrlHeld = ev.Type != 0
+						return false
+					}
+				case input.KEY_LEFTALT, input.KEY_RIGHTALT:
+					{
+						altHeld = ev.Type != 0
+						return false
+					}
+				case input.KEY_LEFTMETA, input.KEY_RIGHTMETA:
+					{
+						metaHeld = ev.Type != 0
+						return false
+					}
+				case input.KEY_CAPSLOCK:
+					{
+						if !capsHasBeenDisabled {
+							capslockOn = ev.Type != 0
 							return false
 						}
-					case input.KEY_LEFTCTRL, input.KEY_RIGHTCTRL:
-						{
-							ctrlHeld = ev.Type != 0
+					}
+				case input.KEY_BACKSPACE:
+					{
+						if len(buffer) > 0 {
+							buffer = buffer[:len(buffer)-1]
+						}
+						return false
+					}
+				default:
+					{
+						if ev.Code > 247 {
 							return false
 						}
-					case input.KEY_LEFTALT, input.KEY_RIGHTALT:
-						{
-							altHeld = ev.Type != 0
+						if ctrlHeld || altHeld || metaHeld {
+							buffer = buffer[:0]
 							return false
 						}
-					case input.KEY_LEFTMETA, input.KEY_RIGHTMETA:
-						{
-							metaHeld = ev.Type != 0
+
+						var table map[int]byte
+						if shiftHeld != capslockOn {
+							table = SHIFTED
+						} else {
+							table = NORMAL
+						}
+
+						char, exists := table[int(ev.Code)]
+						if !exists || char == 0 {
+							// If the key pressed isn't in our alphabet maps, skip it
 							return false
 						}
-					case input.KEY_CAPSLOCK:
-						{
-							if !capsHasBeenDisabled {
-								capslockOn = ev.Type != 0
-								return false
-							}
-						}
-					case input.KEY_BACKSPACE:
-						{
-							if len(buffer) > 0 {
-								buffer = buffer[:len(buffer)-1]
-							}
-							return false
-						}
-					default:
-						{
-							if ctrlHeld || altHeld || metaHeld {
-								buffer = make([]byte, 0)
-								return false
-							}
 
-							var table map[int]byte
-							if shiftHeld != capslockOn {
-								table = SHIFTED
-							} else {
-								table = NORMAL
-							}
+						// strings.Contains needs a string, so we convert our single byte 'char' to string
+						if strings.Contains(TRIGGER_CHARS, string(char)) {
+							for wrong, right := range corrections {
+								// Convert the 'wrong' string to []byte to use bytes.HasSuffix
+								if bytes.HasSuffix(buffer, []byte(wrong)) {
+									isStartOfWord := false
+									wrongLen := len(wrong)
+									bufLen := len(buffer)
 
-							char := table[int(ev.Code)]
+									if bufLen == wrongLen {
+										isStartOfWord = true
+									} else {
+										// Calculate correct positive indices from the back of the buffer
+										prev := buffer[bufLen-wrongLen-1]
+										curr := buffer[bufLen-wrongLen]
 
-							// strings.Contains needs a string, so we convert our single byte 'char' to string
-							if strings.Contains(TRIGGER_CHARS, string(char)) {
-								for wrong, right := range corrections {
-									// Convert the 'wrong' string to []byte to use bytes.HasSuffix
-									if bytes.HasSuffix(buffer, []byte(wrong)) {
-										isStartOfWord := false
-										wrongLen := len(wrong)
-										bufLen := len(buffer)
+										// Safety check: make sure next doesn't go out of bounds
+										var next byte
+										if bufLen-wrongLen+1 < bufLen {
+											next = buffer[bufLen-wrongLen+1]
+										}
 
-										if bufLen == wrongLen {
+										// 1. Check if previous character is not a letter
+										if !unicode.IsLetter(rune(prev)) {
 											isStartOfWord = true
-										} else {
-											// Calculate correct positive indices from the back of the buffer
-											prev := buffer[bufLen-wrongLen-1]
-											curr := buffer[bufLen-wrongLen]
-
-											// Safety check: make sure next doesn't go out of bounds
-											var next byte
-											if bufLen-wrongLen+1 < bufLen {
-												next = buffer[bufLen-wrongLen+1]
-											}
-
-											// 1. Check if previous character is not a letter
-											if !unicode.IsLetter(rune(prev)) {
-												isStartOfWord = true
-											}
-											// 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
-											if unicode.IsLower(rune(prev)) || unicode.IsUpper(rune(curr)) {
-												isStartOfWord = true
-											}
-											// 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa)
-											if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
-												isStartOfWord = true
-											}
 										}
-
-										if isStartOfWord {
-											apply_correction(wrong, right, rune(char))
-
-											// Safely reconstruct the buffer using append()
-											// Slice out the 'wrong' word, then append 'right' (cast to bytes), then append the new 'char'
-											buffer = buffer[:bufLen-wrongLen]
-											buffer = append(buffer, []byte(right)...)
-											buffer = append(buffer, char)
-
-											if len(buffer) > BUFFER_MAX {
-												buffer = buffer[len(buffer)-BUFFER_MAX:]
-											}
-											return true
+										// 2. Camel/Pascal start (lower followed by Upper: e.g., a|B)
+										if unicode.IsLower(rune(prev)) || unicode.IsUpper(rune(curr)) {
+											isStartOfWord = true
 										}
+										// 3. Acronym boundary (Upper followed by Upper then lower: e.g., L|Pa)
+										if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
+											isStartOfWord = true
+										}
+									}
+
+									if isStartOfWord {
+										apply_correction(wrong, right, rune(char))
+
+										// Safely reconstruct the buffer using append()
+										// Slice out the 'wrong' word, then append 'right' (cast to bytes), then append the new 'char'
+										buffer = buffer[:bufLen-wrongLen]
+										buffer = append(buffer, []byte(right)...)
+										buffer = append(buffer, char)
+
+										if len(buffer) > BUFFER_MAX {
+											buffer = buffer[len(buffer)-BUFFER_MAX:]
+										}
+										return true
 									}
 								}
 							}
+						}
 
-							buffer = append(buffer, char)
-							if len(buffer) > BUFFER_MAX {
-								buffer = buffer[len(buffer)-BUFFER_MAX:]
-							}
+						buffer = append(buffer, char)
+						if len(buffer) > BUFFER_MAX {
+							buffer = buffer[len(buffer)-BUFFER_MAX:]
 						}
 					}
 				}
-				return false
-			}()
-			// Response byte loop back to manager
-			if modify {
-				_, err = conn.Write([]byte{1})
-			} else {
-				_, err = conn.Write([]byte{0})
 			}
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-				break
-			}
+			return false
+		}()
+		// Response byte loop back to manager
+		if modify {
+			_, err = conn.Write([]byte{1})
+		} else {
+			_, err = conn.Write([]byte{0})
 		}
-	}()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+			break
+		}
+	}
 }
 
 func apply_correction(wrong, right string, triggerChar rune) {
@@ -427,7 +434,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 
 	// Initialize context registration handshake
 	fmt.Fprint(conn, "INJECT\n")
-	for stroke := range events {
+	for _, stroke := range events {
 		binary.Write(conn, binary.LittleEndian, stroke)
 	}
 }
