@@ -355,7 +355,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 				events = append(events, []WireEvent{
 					{
 						Type:  input.EV_KEY,
-						Code:  keyInfo.Code,
+						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(1),
 					},
 					{
@@ -366,7 +366,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 				events = append(events, []WireEvent{
 					{
 						Type:  input.EV_KEY,
-						Code:  keyInfo.Code,
+						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(0),
 					},
 					{
@@ -374,6 +374,7 @@ func apply_correction(wrong, right string, triggerChar rune) {
 					},
 				}...)
 			}
+			lastUsedShift = keyInfo.Shift
 		}
 		events = append(events, []WireEvent{
 			{
@@ -435,6 +436,10 @@ func apply_correction(wrong, right string, triggerChar rune) {
 	fmt.Fprint(conn, "INJECT\n")
 	for _, stroke := range events {
 		binary.Write(conn, binary.LittleEndian, stroke)
+		binary.Write(conn, binary.LittleEndian, WireEvent{
+			Type: input.EV_SYN,
+		})
+		// time.Sleep(10 * time.Millisecond)
 	}
 }
 
