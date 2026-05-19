@@ -158,11 +158,6 @@ type CorrectionEntry struct {
 	Action                     string // "replace" | "clear buffer" | "error" | ""
 }
 
-// parseCorrectionsConfig converts the raw JSON map into two pre-split maps so
-// the hot-path loop never re-checks types or re-parses values.
-//
-//   - wordBoundary - entries where allowTriggeringInsideWords == false
-//   - anywhere     - entries where allowTriggeringInsideWords == true
 func parseCorrectionsConfig(raw map[string]any) (endActionRequired, anywhere map[string]CorrectionEntry) {
 	endActionRequired = make(map[string]CorrectionEntry, len(raw))
 	anywhere = make(map[string]CorrectionEntry, 0)
@@ -186,6 +181,8 @@ func parseCorrectionsConfig(raw map[string]any) (endActionRequired, anywhere map
 				default:
 					entry.Action = "error"
 				}
+			} else {
+				entry.Action = "replace"
 			}
 			if s, ok := v["replace"].(string); ok {
 				entry.ReplaceWith = s
@@ -323,17 +320,14 @@ func main() {
 
 						char, exists := table[int(ev.Code)]
 						if exists && char != 0 {
-							// tryCorrect checks one pre-split map for a suffix match.
-							// requireWordBoundary skips entries that match mid-word.
-							// Returns true if a correction was applied (sets modify).
-							tryCorrect := func(table map[string]CorrectionEntry) bool {
+							tryCorrect := func(table map[string]CorrectionEntry, buffer []byte) (bool, []byte) {
 								for wrong, entry := range table {
 									if !bytes.HasSuffix(buffer, []byte(wrong)) {
 										continue
 									}
 									wrongLen := len(wrong)
 									bufLen := len(buffer)
-									println("Correcting:", wrong, "->", entry.ReplaceWith,
+									println("?Correcting:", wrong, "->", entry.ReplaceWith,
 										"forceCaseMatch", entry.ForceCaseMatch,
 										"noEndActionRequired", entry.NoEndActionRequired,
 										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
@@ -366,17 +360,23 @@ func main() {
 										}
 									}
 
+									println("!Correcting:", wrong, "->", entry.ReplaceWith,
+										"forceCaseMatch", entry.ForceCaseMatch,
+										"noEndActionRequired", entry.NoEndActionRequired,
+										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
+										"action", entry.Action)
 									modify = true
 									correcting.Store(1)
 									_, err = conn.Write([]byte{1})
 									if err != nil {
 										fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-										return true
+										return true, buffer
 									}
 									switch entry.Action {
 									case "replace":
 										{
 											rightWord := entry.ReplaceWith
+											println("jaksdkadskljadsjasdkljasdklasdjaskjdasjasdjadsljsdakl", char, wrong, rightWord)
 											go apply_correction(wrong, rightWord, rune(char), entry)
 											buffer = buffer[:bufLen-wrongLen]
 											buffer = append(buffer, []byte(entry.ReplaceWith)...)
@@ -388,21 +388,24 @@ func main() {
 									case "clear buffer":
 										{
 											buffer = buffer[:0]
-											return false
+											return false, buffer
 										}
 									default:
 										{
 											println("entry.Action", entry.Action)
 										}
 									}
-									return true
+									return true, buffer
 								}
-								return false
+								return false, buffer
 							}
 							if strings.Contains(TRIGGER_CHARS, string(char)) {
-								modify = tryCorrect(endActionRequiredConnections)
+								modify, _ = tryCorrect(anywhereCorrections, append(buffer, char))
+								if !modify {
+									modify, buffer = tryCorrect(endActionRequiredConnections, buffer)
+								}
 							} else {
-								modify = tryCorrect(anywhereCorrections)
+								modify, _ = tryCorrect(anywhereCorrections, append(buffer, char))
 							}
 							if !modify {
 								buffer = append(buffer, char)
