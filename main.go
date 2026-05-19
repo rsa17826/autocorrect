@@ -376,7 +376,6 @@ func main() {
 									case "replace":
 										{
 											rightWord := entry.ReplaceWith
-											println("jaksdkadskljadsjasdkljasdklasdjaskjdasjasdjadsljsdakl", char, wrong, rightWord)
 											go apply_correction(wrong, rightWord, rune(char), entry)
 											buffer = buffer[:bufLen-wrongLen]
 											buffer = append(buffer, []byte(entry.ReplaceWith)...)
@@ -392,7 +391,7 @@ func main() {
 										}
 									default:
 										{
-											println("entry.Action", entry.Action)
+											println("ERROR: entry.Action: ", entry.Action, wrong, entry.ReplaceWith)
 										}
 									}
 									return true, buffer
