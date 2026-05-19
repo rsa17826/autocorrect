@@ -149,7 +149,70 @@ var RESET_KEYS = []int{
 	input.KEY_ESC,
 }
 
-type CorrectionsConfig map[string]string
+// CorrectionEntry is the parsed, typed form of a single corrections.json entry.
+type CorrectionEntry struct {
+	ReplaceWith                string
+	ForceCaseMatch             bool
+	NoEndActionRequired        bool
+	AllowTriggeringInsideWords bool
+	Action                     string // "replace" | "clear buffer" | "error" | ""
+}
+
+// parseCorrectionsConfig converts the raw JSON map into two pre-split maps so
+// the hot-path loop never re-checks types or re-parses values.
+//
+//   - wordBoundary - entries where allowTriggeringInsideWords == false
+//   - anywhere     - entries where allowTriggeringInsideWords == true
+func parseCorrectionsConfig(raw map[string]any) (endActionRequired, anywhere map[string]CorrectionEntry) {
+	endActionRequired = make(map[string]CorrectionEntry, len(raw))
+	anywhere = make(map[string]CorrectionEntry, 0)
+
+	for wrong, right := range raw {
+		var entry CorrectionEntry
+		entry.ForceCaseMatch = true // default
+		switch v := right.(type) {
+		case string:
+			entry.ReplaceWith = v
+			entry.Action = "replace"
+			entry.ForceCaseMatch = true
+			entry.NoEndActionRequired = false
+			entry.AllowTriggeringInsideWords = false
+
+		case map[string]any:
+			if actionVal, ok := v["action"].(string); ok {
+				switch actionVal {
+				case "replace", "clear buffer":
+					entry.Action = actionVal
+				default:
+					entry.Action = "error"
+				}
+			}
+			if s, ok := v["replace"].(string); ok {
+				entry.ReplaceWith = s
+			} else if entry.Action == "replace" {
+				entry.Action = "error"
+			}
+			if fcm, ok := v["forceCaseMatch"].(bool); ok {
+				entry.ForceCaseMatch = fcm
+			}
+			if near, ok := v["noEndActionRequired"].(bool); ok {
+				entry.NoEndActionRequired = near
+			}
+			if atiw, ok := v["allowTriggeringInsideWords"].(bool); ok {
+				entry.AllowTriggeringInsideWords = atiw
+			}
+		default:
+			entry.Action = "error"
+		}
+
+		if entry.NoEndActionRequired {
+			anywhere[wrong] = entry
+		} else {
+			endActionRequired[wrong] = entry
+		}
+	}
+	return endActionRequired, anywhere
+}
 
 var correcting atomic.Int32
 
@@ -164,8 +227,9 @@ func main() {
 	var correctionsPath string
 	argparse.ParseArgs([]argparse.ArgumentData{
 		{Keys: []string{"capsHasBeenDisabled"}, AfterCount: 0, Target: &capsHasBeenDisabled, Description: "caps is not used to toggle the case state so don't detect use of the capslock button as if it does that"},
-		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "corrections.json")}},
+		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "autocorrect_daemon", "corrections.json")}},
 	})
+
 	if _, err := os.Stat(correctionsPath); os.IsNotExist(err) {
 		_ = os.WriteFile(correctionsPath, defaultConfigFileBytes, 0644)
 	}
@@ -177,11 +241,13 @@ func main() {
 	}
 
 	// 4. Parse (Unmarshal) the JSON into a Go struct or map
-	var corrections CorrectionsConfig
-	err = json.Unmarshal(byteValue, &corrections)
+	var rawCorrections map[string]any
+	err = json.Unmarshal(byteValue, &rawCorrections)
 	if err != nil {
 		log.Fatalf("Failed to parse JSON: %v", err)
 	}
+
+	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
 	if err != nil {
@@ -257,25 +323,34 @@ func main() {
 
 						char, exists := table[int(ev.Code)]
 						if exists && char != 0 {
-							if strings.Contains(TRIGGER_CHARS, string(char)) {
-								for wrong, right := range corrections {
-									if bytes.HasSuffix(buffer, []byte(wrong)) {
-										println("Correcting:", wrong, "->", right)
+							// tryCorrect checks one pre-split map for a suffix match.
+							// requireWordBoundary skips entries that match mid-word.
+							// Returns true if a correction was applied (sets modify).
+							tryCorrect := func(table map[string]CorrectionEntry, requireWordBoundary bool) bool {
+								for wrong, entry := range table {
+									if !bytes.HasSuffix(buffer, []byte(wrong)) {
+										continue
+									}
+									wrongLen := len(wrong)
+									bufLen := len(buffer)
+									println("Correcting:", wrong, "->", entry.ReplaceWith,
+										"forceCaseMatch", entry.ForceCaseMatch,
+										"noEndActionRequired", entry.NoEndActionRequired,
+										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
+										"action", entry.Action)
+									println("bufLen", bufLen, wrongLen)
+
+									if requireWordBoundary {
 										isStartOfWord := false
-										wrongLen := len(wrong)
-										bufLen := len(buffer)
-										println("bufLen", bufLen, wrongLen)
 										if bufLen == wrongLen {
 											isStartOfWord = true
 										} else {
 											prev := buffer[bufLen-wrongLen-1]
 											curr := buffer[bufLen-wrongLen]
-
 											var next byte
 											if bufLen-wrongLen+1 < bufLen {
 												next = buffer[bufLen-wrongLen+1]
 											}
-
 											if !unicode.IsLetter(rune(prev)) {
 												isStartOfWord = true
 											}
@@ -286,31 +361,51 @@ func main() {
 												isStartOfWord = true
 											}
 										}
+										if !isStartOfWord {
+											continue
+										}
+									}
 
-										if isStartOfWord {
-											modify = true
-											correcting.Store(1)
-											_, err = conn.Write([]byte{1})
-											if err != nil {
-												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-												break
-											}
-											go apply_correction(wrong, right, rune(char))
-
+									modify = true
+									correcting.Store(1)
+									_, err = conn.Write([]byte{1})
+									if err != nil {
+										fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+										return true
+									}
+									switch entry.Action {
+									case "replace":
+										{
+											rightWord := entry.ReplaceWith
+											go apply_correction(wrong, rightWord, rune(char), entry)
 											buffer = buffer[:bufLen-wrongLen]
-											buffer = append(buffer, []byte(right)...)
+											buffer = append(buffer, []byte(entry.ReplaceWith)...)
 											buffer = append(buffer, char)
-
 											if len(buffer) > BUFFER_MAX {
 												buffer = buffer[len(buffer)-BUFFER_MAX:]
 											}
-
-											break
+										}
+									case "clear buffer":
+										{
+											buffer = buffer[:0]
+											return false
+										}
+									default:
+										{
+											println("entry.Action", entry.Action)
 										}
 									}
+									return true
 								}
+								return false
 							}
-
+							if strings.Contains(TRIGGER_CHARS, string(char)) {
+								// Check anywhere-entries first (no boundary check needed), then
+								// word-boundary-only entries. Stop as soon as one fires.
+								modify = tryCorrect(endActionRequiredConnections, true)
+							} else {
+								modify = tryCorrect(anywhereCorrections, false)
+							}
 							if !modify {
 								buffer = append(buffer, char)
 								if len(buffer) > BUFFER_MAX {
@@ -319,7 +414,7 @@ func main() {
 							}
 						}
 					}
-					println(fmt.Sprintf("[%s]", buffer), len(corrections))
+					println(fmt.Sprintf("[%s]", buffer), len(endActionRequiredConnections)+len(anywhereCorrections))
 				}
 			}
 		}
@@ -342,12 +437,15 @@ func main() {
 	}
 }
 
-func apply_correction(wrong, right string, triggerChar rune) {
+func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEntry) {
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]WireEvent, 0)
 	var lastUsedShift bool = shiftHeld
-	for range wrong {
+	for i := range wrong {
+		if entry.NoEndActionRequired && i == 0 {
+			continue
+		}
 		events = append(events, []WireEvent{
 			{
 				Type:  input.EV_KEY,
@@ -425,25 +523,27 @@ func apply_correction(wrong, right string, triggerChar rune) {
 			}...)
 		}
 	}
-	events = append(events, []WireEvent{
-		{},
-		{
-			Type:  input.EV_KEY,
-			Code:  input.CharKeyMap[triggerChar].Code,
-			Value: int32(0),
-		},
-		{
-			Type:  input.EV_KEY,
-			Code:  input.CharKeyMap[triggerChar].Code,
-			Value: int32(1),
-		},
-		{
-			Type:  input.EV_KEY,
-			Code:  input.CharKeyMap[triggerChar].Code,
-			Value: int32(0),
-		},
-		{},
-	}...)
+	if !entry.NoEndActionRequired {
+		events = append(events, []WireEvent{
+			{},
+			{
+				Type:  input.EV_KEY,
+				Code:  input.CharKeyMap[triggerChar].Code,
+				Value: int32(0),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  input.CharKeyMap[triggerChar].Code,
+				Value: int32(1),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  input.CharKeyMap[triggerChar].Code,
+				Value: int32(0),
+			},
+			{},
+		}...)
+	}
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
 	if err != nil {
 		panic(err)
@@ -455,7 +555,6 @@ func apply_correction(wrong, right string, triggerChar rune) {
 	for i, stroke := range events {
 		binary.Write(conn, binary.LittleEndian, stroke)
 		binary.Write(conn, binary.LittleEndian, WireEvent{})
-		println(i%10 == 0)
 		if i != 0 && i%10 == 0 {
 			time.Sleep(1 * time.Millisecond)
 		}
