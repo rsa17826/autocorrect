@@ -326,7 +326,7 @@ func main() {
 							// tryCorrect checks one pre-split map for a suffix match.
 							// requireWordBoundary skips entries that match mid-word.
 							// Returns true if a correction was applied (sets modify).
-							tryCorrect := func(table map[string]CorrectionEntry, requireWordBoundary bool) bool {
+							tryCorrect := func(table map[string]CorrectionEntry) bool {
 								for wrong, entry := range table {
 									if !bytes.HasSuffix(buffer, []byte(wrong)) {
 										continue
@@ -340,7 +340,7 @@ func main() {
 										"action", entry.Action)
 									println("bufLen", bufLen, wrongLen)
 
-									if requireWordBoundary {
+									if !entry.AllowTriggeringInsideWords {
 										isStartOfWord := false
 										if bufLen == wrongLen {
 											isStartOfWord = true
@@ -400,11 +400,9 @@ func main() {
 								return false
 							}
 							if strings.Contains(TRIGGER_CHARS, string(char)) {
-								// Check anywhere-entries first (no boundary check needed), then
-								// word-boundary-only entries. Stop as soon as one fires.
-								modify = tryCorrect(endActionRequiredConnections, true)
+								modify = tryCorrect(endActionRequiredConnections)
 							} else {
-								modify = tryCorrect(anywhereCorrections, false)
+								modify = tryCorrect(anywhereCorrections)
 							}
 							if !modify {
 								buffer = append(buffer, char)
@@ -414,15 +412,12 @@ func main() {
 							}
 						}
 					}
-					println(fmt.Sprintf("[%s]", buffer), len(endActionRequiredConnections)+len(anywhereCorrections))
+					println(fmt.Sprintf("[%s]", buffer), len(endActionRequiredConnections), len(anywhereCorrections))
 				}
 			}
 		}
 
 		// Response byte loop back out to manager
-		if modify {
-			println(modify, "modify")
-		}
 		if !modify {
 			resp := byte(0)
 			if correcting.Load() == 1 && ev.Value != 0 {
