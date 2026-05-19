@@ -388,6 +388,7 @@ func main() {
 											if len(buffer) > BUFFER_MAX {
 												buffer = buffer[len(buffer)-BUFFER_MAX:]
 											}
+											return true, buffer
 										}
 									case "clear buffer":
 										{
@@ -416,6 +417,13 @@ func main() {
 							} else {
 								foundMatchingEntry, buffer = tryCorrect(anywhereCorrections)
 							}
+							println("foundMatchingEntry", foundMatchingEntry)
+							if !foundMatchingEntry {
+								buffer = append(buffer, char)
+								if len(buffer) > BUFFER_MAX {
+									buffer = buffer[len(buffer)-BUFFER_MAX:]
+								}
+							}
 						}
 					}
 					println(fmt.Sprintf("[%s]", buffer), len(endActionRequiredConnections), len(anywhereCorrections))
@@ -439,7 +447,7 @@ func main() {
 }
 
 func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEntry) {
-	println("asdjkasdjkasdjkads", wrong, right, triggerChar)
+	println("asdjkasdjkasdjkads", wrong, right, triggerChar, entry.NoEndActionRequired)
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]WireEvent, 0)
