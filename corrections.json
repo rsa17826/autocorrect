@@ -4844,7 +4844,187 @@
     "allowTriggeringInsideWords": true,
     "replace": "sive"
   },
+  "align": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "antiforeign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "arraign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "assign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "benign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
   "campaign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "champaign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "codesign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "coign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "condign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "consign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "coreign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "cosign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "countercampaign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "countersign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "deign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "deraign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "design": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "eloign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "ensign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "feign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "foreign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "indign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "malign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "misalign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "outdesign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "overdesign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "preassign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "realign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "reassign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "redesign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "reign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "resign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "sign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "sovereign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "unbenign": {
+    "allowTriggeringInsideWords": true,
+    "noEndActionRequired": true,
+    "action": "clear buffer"
+  },
+  "verisign": {
     "allowTriggeringInsideWords": true,
     "noEndActionRequired": true,
     "action": "clear buffer"
