@@ -328,8 +328,14 @@ func main() {
 									} else {
 										testBuffer = buffer
 									}
-									if !bytes.HasSuffix(testBuffer, []byte(wrong)) {
-										continue
+									if entry.ForceCaseMatch {
+										if !bytes.HasSuffix(testBuffer, []byte(wrong)) {
+											continue
+										}
+									} else {
+										if !bytes.HasSuffix(bytes.ToLower(testBuffer), bytes.ToLower([]byte(wrong))) {
+											continue
+										}
 									}
 									wrongLen := len(wrong)
 									bufLen := len(testBuffer)
