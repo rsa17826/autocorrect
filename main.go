@@ -275,7 +275,7 @@ func main() {
 		const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
 		const BUFFER_MAX int = 150
 
-		modify := false
+		var foundMatchingEntry bool
 
 		// FIX 1: Explicitly verify this is a keyboard driver action event
 		if ev.Type == input.EV_KEY {
@@ -320,30 +320,35 @@ func main() {
 
 						char, exists := table[int(ev.Code)]
 						if exists && char != 0 {
-							tryCorrect := func(table map[string]CorrectionEntry, buffer []byte) (bool, []byte) {
+							tryCorrect := func(table map[string]CorrectionEntry) (bool, []byte) {
 								for wrong, entry := range table {
-									if !bytes.HasSuffix(buffer, []byte(wrong)) {
+									var testBuffer []byte
+									if entry.NoEndActionRequired {
+										testBuffer = append(buffer, char)
+									} else {
+										testBuffer = buffer
+									}
+									if !bytes.HasSuffix(testBuffer, []byte(wrong)) {
 										continue
 									}
 									wrongLen := len(wrong)
-									bufLen := len(buffer)
+									bufLen := len(testBuffer)
 									println("?Correcting:", wrong, "->", entry.ReplaceWith,
 										"forceCaseMatch", entry.ForceCaseMatch,
 										"noEndActionRequired", entry.NoEndActionRequired,
 										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
 										"action", entry.Action)
 									println("bufLen", bufLen, wrongLen)
-
 									if !entry.AllowTriggeringInsideWords {
 										isStartOfWord := false
 										if bufLen == wrongLen {
 											isStartOfWord = true
 										} else {
-											prev := buffer[bufLen-wrongLen-1]
-											curr := buffer[bufLen-wrongLen]
+											prev := testBuffer[bufLen-wrongLen-1]
+											curr := testBuffer[bufLen-wrongLen]
 											var next byte
 											if bufLen-wrongLen+1 < bufLen {
-												next = buffer[bufLen-wrongLen+1]
+												next = testBuffer[bufLen-wrongLen+1]
 											}
 											if !unicode.IsLetter(rune(prev)) {
 												isStartOfWord = true
@@ -365,16 +370,16 @@ func main() {
 										"noEndActionRequired", entry.NoEndActionRequired,
 										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
 										"action", entry.Action)
-									modify = true
-									correcting.Store(1)
-									_, err = conn.Write([]byte{1})
-									if err != nil {
-										fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-										return true, buffer
-									}
+
 									switch entry.Action {
 									case "replace":
 										{
+											correcting.Store(1)
+											_, err = conn.Write([]byte{1})
+											if err != nil {
+												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+												return true, buffer
+											}
 											rightWord := entry.ReplaceWith
 											go apply_correction(wrong, rightWord, rune(char), entry)
 											buffer = buffer[:bufLen-wrongLen]
@@ -386,31 +391,30 @@ func main() {
 										}
 									case "clear buffer":
 										{
+											_, err = conn.Write([]byte{0})
+											if err != nil {
+												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+												return true, buffer
+											}
 											buffer = buffer[:0]
-											return false, buffer
+											return true, buffer
 										}
 									default:
 										{
 											println("ERROR: entry.Action: ", entry.Action, wrong, entry.ReplaceWith)
+											return true, buffer
 										}
 									}
-									return true, buffer
 								}
 								return false, buffer
 							}
 							if strings.Contains(TRIGGER_CHARS, string(char)) {
-								modify, _ = tryCorrect(anywhereCorrections, append(buffer, char))
-								if !modify {
-									modify, buffer = tryCorrect(endActionRequiredConnections, buffer)
+								foundMatchingEntry, buffer = tryCorrect(anywhereCorrections)
+								if !foundMatchingEntry {
+									foundMatchingEntry, buffer = tryCorrect(endActionRequiredConnections)
 								}
 							} else {
-								modify, _ = tryCorrect(anywhereCorrections, append(buffer, char))
-							}
-							if !modify {
-								buffer = append(buffer, char)
-								if len(buffer) > BUFFER_MAX {
-									buffer = buffer[len(buffer)-BUFFER_MAX:]
-								}
+								foundMatchingEntry, buffer = tryCorrect(anywhereCorrections)
 							}
 						}
 					}
@@ -420,7 +424,7 @@ func main() {
 		}
 
 		// Response byte loop back out to manager
-		if !modify {
+		if !foundMatchingEntry {
 			resp := byte(0)
 			if correcting.Load() == 1 && ev.Value != 0 {
 				resp = 1 // block ALL events while correction is in flight
@@ -435,14 +439,18 @@ func main() {
 }
 
 func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEntry) {
+	println("asdjkasdjkasdjkads", wrong, right, triggerChar)
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]WireEvent, 0)
 	var lastUsedShift bool = shiftHeld
-	for i := range wrong {
-		if entry.NoEndActionRequired && i == 0 {
-			continue
-		}
+	backspaces := len(wrong)
+
+	if entry.NoEndActionRequired && entry.Action == "replace" {
+		backspaces--
+	}
+
+	for range backspaces {
 		events = append(events, []WireEvent{
 			{
 				Type:  input.EV_KEY,
