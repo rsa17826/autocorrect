@@ -17,16 +17,9 @@ import (
 
 	argparse "github.com/rsa17826/go-arg-lib"
 	"github.com/rsa17826/go-input-lib"
+	"github.com/rsa17826/input-manager/IMan"
 	"github.com/segmentio/encoding/json"
 )
-
-type WireEvent struct {
-	Sec   int64
-	Usec  int64
-	Type  uint16
-	Code  uint16
-	Value int32
-}
 
 //go:embed corrections.json
 var defaultConfigFileBytes []byte
@@ -252,7 +245,7 @@ func main() {
 	}
 	defer conn.Close()
 	fmt.Fprint(conn, "FILTER\n")
-	var ev WireEvent
+	var ev IMan.WireEvent
 	evSize := binary.Size(ev)
 	buf := make([]byte, evSize)
 	buffer := make([]byte, 0, 150)
@@ -456,7 +449,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	println("asdjkasdjkasdjkads", wrong, right, triggerChar, entry.NoEndActionRequired)
 	correcting.Store(1)
 	defer correcting.Store(0)
-	events := make([]WireEvent, 0)
+	events := make([]IMan.WireEvent, 0)
 	var lastUsedShift bool = shiftHeld
 	backspaces := len(wrong)
 
@@ -465,7 +458,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	}
 
 	for range backspaces {
-		events = append(events, []WireEvent{
+		events = append(events, []IMan.WireEvent{
 			{
 				Type:  input.EV_KEY,
 				Code:  input.KEY_BACKSPACE,
@@ -478,14 +471,14 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	events = append(events, []WireEvent{
+	events = append(events, []IMan.WireEvent{
 		{},
 	}...)
 	for _, char := range right {
 		keyInfo := input.CharKeyMap[char]
 		if keyInfo.Shift != lastUsedShift {
 			if keyInfo.Shift {
-				events = append(events, []WireEvent{
+				events = append(events, []IMan.WireEvent{
 					{
 						Type:  input.EV_KEY,
 						Code:  input.KEY_LEFTSHIFT,
@@ -494,7 +487,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 					{},
 				}...)
 			} else {
-				events = append(events, []WireEvent{
+				events = append(events, []IMan.WireEvent{
 					{
 						Type:  input.EV_KEY,
 						Code:  input.KEY_LEFTSHIFT,
@@ -505,7 +498,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			}
 			lastUsedShift = keyInfo.Shift
 		}
-		events = append(events, []WireEvent{
+		events = append(events, []IMan.WireEvent{
 			{
 				Type:  input.EV_KEY,
 				Code:  keyInfo.Code,
@@ -525,7 +518,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	}
 	if lastUsedShift != shiftHeld {
 		if shiftHeld {
-			events = append(events, []WireEvent{
+			events = append(events, []IMan.WireEvent{
 				{
 					Type:  input.EV_KEY,
 					Code:  input.KEY_LEFTSHIFT,
@@ -533,7 +526,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				},
 			}...)
 		} else {
-			events = append(events, []WireEvent{
+			events = append(events, []IMan.WireEvent{
 				{
 					Type:  input.EV_KEY,
 					Code:  input.KEY_LEFTSHIFT,
@@ -543,7 +536,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 		}
 	}
 	if !entry.NoEndActionRequired {
-		events = append(events, []WireEvent{
+		events = append(events, []IMan.WireEvent{
 			{},
 			{
 				Type:  input.EV_KEY,
@@ -570,10 +563,14 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	defer conn.Close()
 
 	// Initialize context registration handshake
-	fmt.Fprint(conn, "INJECT\n")
+	im, err := IMan.Connect(IMan.ModeInjection)
+	if err != nil {
+		panic(err)
+	}
 	for i, stroke := range events {
-		binary.Write(conn, binary.LittleEndian, stroke)
-		binary.Write(conn, binary.LittleEndian, WireEvent{})
+		im.Send(stroke)
+		// binary.Write(conn, binary.LittleEndian, stroke)
+		// binary.Write(conn, binary.LittleEndian, IMan.WireEvent{})
 		if i != 0 && i%10 == 0 {
 			time.Sleep(1 * time.Millisecond)
 		}
@@ -594,7 +591,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 
 // 	// // Frame an injection event packet (e.g., Force Mouse right relative +100 units)
 // 	// if x != 0 {
-// 	// 	stroke := WireEvent{
+// 	// 	stroke := IMan.WireEvent{
 // 	// 		Type:  input.EV_REL, // EV_REL
 // 	// 		Code:  input.REL_X,  // REL_X
 // 	// 		Value: int32(x),     // Move right 100 pixels
@@ -603,7 +600,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 // 	// 	binary.Write(conn, binary.LittleEndian, stroke)
 // 	// }
 // 	// if y != 0 {
-// 	// 	stroke := WireEvent{
+// 	// 	stroke := IMan.WireEvent{
 // 	// 		Type:  input.EV_REL, // EV_REL
 // 	// 		Code:  input.REL_Y,  // REL_X
 // 	// 		Value: int32(y),     // Move right 100 pixels
