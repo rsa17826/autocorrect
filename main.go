@@ -239,19 +239,19 @@ func main() {
 
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 
-	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
+	conn, err := IMan.Connect(IMan.ModeBlocking)
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
-	fmt.Fprint(conn, "FILTER\n")
+
 	var ev IMan.WireEvent
 	evSize := binary.Size(ev)
 	buf := make([]byte, evSize)
 	buffer := make([]byte, 0, 150)
 
 	for {
-		_, err := io.ReadFull(conn, buf)
+		_, err := conn.ReadFull(buf)
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				fmt.Println("Manager closed the connection.")
@@ -374,7 +374,7 @@ func main() {
 									case "replace":
 										{
 											correcting.Store(1)
-											_, err = conn.Write([]byte{1})
+											_, err = conn.BlockInput(1)
 											if err != nil {
 												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
 												return true, buffer
@@ -391,7 +391,7 @@ func main() {
 										}
 									case "clear buffer":
 										{
-											_, err = conn.Write([]byte{0})
+											_, err = conn.BlockInput(0)
 											if err != nil {
 												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
 												return true, buffer
@@ -436,7 +436,7 @@ func main() {
 			if correcting.Load() == 1 && ev.Value != 0 {
 				resp = 1 // block ALL events while correction is in flight
 			}
-			_, err = conn.Write([]byte{resp})
+			_, err = conn.BlockInput(resp)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)

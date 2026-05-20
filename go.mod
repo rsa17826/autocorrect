@@ -9,7 +9,7 @@ require (
 )
 
 require (
-	github.com/rsa17826/input-manager v0.0.34 // indirect
+	github.com/rsa17826/input-manager v0.0.36 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	golang.org/x/sys v0.44.0 // indirect
 )
