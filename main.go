@@ -240,7 +240,7 @@ func main() {
 
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 
-	conn, err := IMan.Connect("autocorrect", IMan.ModeBlocking)
+	conn, err := IMan.Connect("autocorrect", IMan.ModeFilter)
 	if err != nil {
 		panic(err)
 	}
