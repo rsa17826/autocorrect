@@ -28,7 +28,7 @@
             pname = "autocorrect";
             version = "3";
             src = ./.;
-            vendorHash = "sha256-EYGnTOSTW2jpYbSnO0N6uJwu1D6+y8AGNoy/BZ9Hdds=";
+            vendorHash = "sha256-gwv8lmP8DjbmPxYx7tdc7n7zWw3lHDn5Q5drJ51NuTE=";
           };
         };
         devShells = {

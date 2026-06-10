@@ -10,8 +10,6 @@ require (
 )
 
 require (
-	github.com/esiqveland/notify v0.13.3 // indirect
-	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 )
