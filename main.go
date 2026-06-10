@@ -246,7 +246,7 @@ func main() {
 	}
 	go func() {
 		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT)
 		<-sigChan
 		conn.Close()
 		os.Exit(1)
