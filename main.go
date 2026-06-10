@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	_ "embed"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -239,30 +238,25 @@ func main() {
 
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 
-	conn, err := IMan.Connect(IMan.ModeBlocking)
+	conn, err := IMan.Connect("autocorrect", IMan.ModeBlocking)
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
 
 	var ev IMan.WireEvent
-	evSize := binary.Size(ev)
-	buf := make([]byte, evSize)
 	buffer := make([]byte, 0, 150)
 
 	for {
-		_, err := conn.ReadFull(buf)
+		resp, err := conn.ReadNext()
+		ev = resp.Event
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				fmt.Println("Manager closed the connection.")
 			} else {
 				fmt.Fprintf(os.Stderr, "Error reading wire event: %v\n", err)
 			}
-			break
-		}
-		if err := binary.Read(bytes.NewReader(buf), binary.LittleEndian, &ev); err != nil {
-			fmt.Fprintf(os.Stderr, "Error decoding wire event: %v\n", err)
-			break
+			os.Exit(1)
 		}
 
 		const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
@@ -563,7 +557,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	defer conn.Close()
 
 	// Initialize context registration handshake
-	im, err := IMan.Connect(IMan.ModeInjection)
+	im, err := IMan.Connect("autocorrect", IMan.ModeInjection)
 	if err != nil {
 		panic(err)
 	}
