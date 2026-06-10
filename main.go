@@ -249,7 +249,7 @@ func main() {
 		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 		<-sigChan
 		conn.Close()
-		os.Exit(0)
+		os.Exit(1)
 	}()
 
 	var ev IMan.WireEvent
