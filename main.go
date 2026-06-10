@@ -8,9 +8,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -242,28 +244,34 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	defer conn.Close()
+	go func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+		<-sigChan
+		conn.Close()
+		os.Exit(0)
+	}()
 
 	var ev IMan.WireEvent
 	buffer := make([]byte, 0, 150)
 
 	for {
 		resp, err := conn.ReadNext()
-		ev = resp.Event
 		if err != nil {
 			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				time.Sleep(1 * time.Second)
 				fmt.Println("Manager closed the connection.")
 			} else {
 				fmt.Fprintf(os.Stderr, "Error reading wire event: %v\n", err)
 			}
 			os.Exit(1)
 		}
+		ev = resp.Event
 
 		const TRIGGER_CHARS = " \t\n-()[]{}';:/\\,.?!@#$%^&*+=<>|`~\""
 		const BUFFER_MAX int = 150
 
 		var foundMatchingEntry bool
-
 		// FIX 1: Explicitly verify this is a keyboard driver action event
 		if ev.Type == input.EV_KEY {
 			// Value == 1 is Key Press, Value == 2 is Key Repeat. Value == 0 is Key Release!
