@@ -442,7 +442,7 @@ func main() {
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-			break
+			os.Exit(1)
 		}
 	}
 }
