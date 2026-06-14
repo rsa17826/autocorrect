@@ -435,14 +435,14 @@ func main() {
 		// Response byte loop back out to manager
 		if !foundMatchingEntry {
 			resp := byte(0)
-			if correcting.Load() == 1 && ev.Value != 0 {
+			if ev.Value != 0 && correcting.Load() == 1 {
 				resp = 1 // block ALL events while correction is in flight
 			}
 			_, err = conn.BlockInput(resp)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-			os.Exit(1)
+			// os.Exit(1)
 		}
 	}
 }
