@@ -207,11 +207,8 @@ func parseCorrectionsConfig(raw map[string]any) (endActionRequired, anywhere map
 
 var correcting atomic.Int32
 
-var shiftHeld bool
-var ctrlHeld bool
-var altHeld bool
-var metaHeld bool
 var capslockOn bool
+var conn IMan.ManagerConnection
 
 func main() {
 	var capsHasBeenDisabled bool
@@ -241,6 +238,10 @@ func main() {
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 
 	conn, err := IMan.Connect("autocorrect", IMan.ModeFilter)
+	if err != nil {
+		panic(err)
+	}
+	err = conn.EnableKeyMap(false)
 	if err != nil {
 		panic(err)
 	}
@@ -279,26 +280,13 @@ func main() {
 			isKeyPress := (ev.Value == 1 || ev.Value == 2)
 
 			switch ev.Code {
-			case input.KEY_LEFTSHIFT, input.KEY_RIGHTSHIFT:
-				shiftHeld = (ev.Value != 0)
-
-			case input.KEY_LEFTCTRL, input.KEY_RIGHTCTRL:
-				ctrlHeld = (ev.Value != 0)
-
-			case input.KEY_LEFTALT, input.KEY_RIGHTALT:
-				altHeld = (ev.Value != 0)
-
-			case input.KEY_LEFTMETA, input.KEY_RIGHTMETA:
-				metaHeld = (ev.Value != 0)
-
 			case input.KEY_CAPSLOCK:
 				if !capsHasBeenDisabled && isKeyPress {
 					capslockOn = !capslockOn
 				}
 			default:
-				// FIX 2: Only collect and alter alphanumeric strings if it's a Down/Repeat stroke
 				if isKeyPress && ev.Code <= 247 {
-					if ctrlHeld || altHeld || metaHeld {
+					if conn.AltPressedReal() || conn.CtrlPressedReal() || conn.MetaPressedReal() {
 						buffer = buffer[:0]
 					} else {
 						if ev.Code == input.KEY_BACKSPACE {
@@ -307,7 +295,7 @@ func main() {
 							}
 						}
 						var table map[int]byte
-						if shiftHeld != capslockOn {
+						if conn.ShiftPressedReal() != capslockOn {
 							table = SHIFTED
 						} else {
 							table = NORMAL
@@ -339,7 +327,7 @@ func main() {
 										"noEndActionRequired", entry.NoEndActionRequired,
 										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
 										"action", entry.Action)
-									println("bufLen", bufLen, wrongLen)
+									// println("bufLen", bufLen, wrongLen)
 									if !entry.AllowTriggeringInsideWords {
 										isStartOfWord := false
 										if bufLen == wrongLen {
@@ -427,7 +415,7 @@ func main() {
 							}
 						}
 					}
-					println(fmt.Sprintf("[%s]", buffer), len(endActionRequiredConnections), len(anywhereCorrections))
+					// println(fmt.Sprintf("[%s]", buffer), len(endActionRequiredConnections), len(anywhereCorrections))
 				}
 			}
 		}
@@ -448,11 +436,11 @@ func main() {
 }
 
 func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEntry) {
-	println("asdjkasdjkasdjkads", wrong, right, triggerChar, entry.NoEndActionRequired)
+	// println("asdjkasdjkasdjkads", wrong, right, triggerChar, entry.NoEndActionRequired, conn.PressedKeys())
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]IMan.WireEvent, 0)
-	var lastUsedShift bool = shiftHeld
+	var lastUsedShift bool = conn.ShiftPressedReal()
 	backspaces := len(wrong)
 
 	if entry.NoEndActionRequired && entry.Action == "replace" {
@@ -473,9 +461,9 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	events = append(events, []IMan.WireEvent{
-		{},
-	}...)
+	// events = append(events, []IMan.WireEvent{
+	// 	{},
+	// }...)
 	for _, char := range right {
 		keyInfo := input.CharKeyMap[char]
 		if keyInfo.Shift != lastUsedShift {
@@ -486,7 +474,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(1),
 					},
-					{},
+					// {},
 				}...)
 			} else {
 				events = append(events, []IMan.WireEvent{
@@ -495,7 +483,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(0),
 					},
-					{},
+					// {},
 				}...)
 			}
 			lastUsedShift = keyInfo.Shift
@@ -518,8 +506,8 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	if lastUsedShift != shiftHeld {
-		if shiftHeld {
+	if lastUsedShift != conn.ShiftPressedReal() {
+		if conn.ShiftPressedReal() {
 			events = append(events, []IMan.WireEvent{
 				{
 					Type:  input.EV_KEY,
@@ -539,7 +527,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	}
 	if !entry.NoEndActionRequired {
 		events = append(events, []IMan.WireEvent{
-			{},
+			// {},
 			{
 				Type:  input.EV_KEY,
 				Code:  input.CharKeyMap[triggerChar].Code,
@@ -555,7 +543,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				Code:  input.CharKeyMap[triggerChar].Code,
 				Value: int32(0),
 			},
-			{},
+			// {},
 		}...)
 	}
 	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
