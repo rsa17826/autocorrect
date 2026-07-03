@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -142,6 +141,8 @@ var RESET_KEYS = []int{
 	input.KEY_DELETE,
 	input.KEY_ESC,
 }
+var send *IMan.ManagerConnection
+var err error
 
 // CorrectionEntry is the parsed, typed form of a single corrections.json entry.
 type CorrectionEntry struct {
@@ -217,7 +218,10 @@ func main() {
 		{Keys: []string{"capsHasBeenDisabled"}, AfterCount: 0, Target: &capsHasBeenDisabled, Description: "caps is not used to toggle the case state so don't detect use of the capslock button as if it does that"},
 		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "autocorrect_daemon", "corrections.json")}},
 	})
-
+	send, err = IMan.Connect("autocorrect", IMan.ModeInjection)
+	if err != nil {
+		panic(err)
+	}
 	if _, err := os.Stat(correctionsPath); os.IsNotExist(err) {
 		_ = os.WriteFile(correctionsPath, defaultConfigFileBytes, 0644)
 	}
@@ -546,19 +550,10 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			// {},
 		}...)
 	}
-	conn, err := net.Dial("unix", "/tmp/kbd_manager.sock")
-	if err != nil {
-		panic(err)
-	}
-	defer conn.Close()
 
 	// Initialize context registration handshake
-	im, err := IMan.Connect("autocorrect", IMan.ModeInjection)
-	if err != nil {
-		panic(err)
-	}
 	for i, stroke := range events {
-		im.Send(stroke)
+		send.Send(stroke)
 		// binary.Write(conn, binary.LittleEndian, stroke)
 		// binary.Write(conn, binary.LittleEndian, IMan.WireEvent{})
 		if i != 0 && i%10 == 0 {
