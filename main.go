@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -283,6 +284,13 @@ func main() {
 			// We handle Modifiers on both Press AND Release, but ignore text updates on Release.
 			isKeyPress := (ev.Value == 1 || ev.Value == 2)
 
+			// Cursor moved (arrows, home/end, page up/down, delete, esc) — the
+			// buffer no longer reflects the text immediately before the caret,
+			// so drop it. Also applies on correction-blocked replay window.
+			if isKeyPress && slices.Contains(RESET_KEYS, int(ev.Code)) {
+				buffer = buffer[:0]
+			}
+
 			switch ev.Code {
 			case input.KEY_CAPSLOCK:
 				if !capsHasBeenDisabled && isKeyPress {
@@ -465,9 +473,9 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	// events = append(events, []IMan.WireEvent{
-	// 	{},
-	// }...)
+	events = append(events, []IMan.WireEvent{
+		{},
+	}...)
 	for _, char := range right {
 		keyInfo := input.CharKeyMap[char]
 		if keyInfo.Shift != lastUsedShift {
@@ -478,7 +486,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(1),
 					},
-					// {},
+					{},
 				}...)
 			} else {
 				events = append(events, []IMan.WireEvent{
@@ -487,7 +495,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 						Code:  input.KEY_LEFTSHIFT,
 						Value: int32(0),
 					},
-					// {},
+					{},
 				}...)
 			}
 			lastUsedShift = keyInfo.Shift
@@ -531,7 +539,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	}
 	if !entry.NoEndActionRequired {
 		events = append(events, []IMan.WireEvent{
-			// {},
+			{},
 			{
 				Type:  input.EV_KEY,
 				Code:  input.CharKeyMap[triggerChar].Code,
@@ -547,7 +555,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				Code:  input.CharKeyMap[triggerChar].Code,
 				Value: int32(0),
 			},
-			// {},
+			{},
 		}...)
 	}
 
@@ -556,7 +564,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 		send.Send(stroke)
 		// binary.Write(conn, binary.LittleEndian, stroke)
 		// binary.Write(conn, binary.LittleEndian, IMan.WireEvent{})
-		if i != 0 && i%10 == 0 {
+		if i != 0 && i%20 == 0 {
 			time.Sleep(1 * time.Millisecond)
 		}
 	}
