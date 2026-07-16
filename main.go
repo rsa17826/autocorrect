@@ -454,11 +454,11 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	events := make([]IMan.WireEvent, 0)
 	var lastUsedShift bool = conn.ShiftPressedReal()
 	backspaces := len(wrong)
-
+	println(entry.Action, entry.NoEndActionRequired, entry.ReplaceWith, backspaces)
 	if entry.NoEndActionRequired && entry.Action == "replace" {
 		backspaces--
 	}
-
+	println(backspaces)
 	for range backspaces {
 		events = append(events, []IMan.WireEvent{
 			{
