@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -207,6 +208,62 @@ func parseCorrectionsConfig(raw map[string]any) (endActionRequired, anywhere map
 	return endActionRequired, anywhere
 }
 
+// correctionIndex buckets correction keys by their last byte so a keystroke
+// only has to check the handful of entries that could possibly match the
+// current suffix, instead of scanning every entry in the corrections file.
+//
+// Every entry checked in tryCorrect is a bytes.HasSuffix(testBuffer, wrong)
+// test, which can only succeed if the last byte of "wrong" equals the last
+// byte of testBuffer (case-folded, for entries with ForceCaseMatch==false).
+// That means the last byte alone is enough to discard the vast majority of
+// entries up front without ever touching them.
+type correctionIndex struct {
+	entries map[string]CorrectionEntry
+	csLast  map[byte][]string // ForceCaseMatch entries, keyed by literal last byte
+	ciLast  map[byte][]string // !ForceCaseMatch entries, keyed by lowercased last byte
+}
+
+func toLowerByte(b byte) byte {
+	if b >= 'A' && b <= 'Z' {
+		return b + ('a' - 'A')
+	}
+	return b
+}
+
+func buildCorrectionIndex(m map[string]CorrectionEntry) *correctionIndex {
+	idx := &correctionIndex{
+		entries: m,
+		csLast:  make(map[byte][]string),
+		ciLast:  make(map[byte][]string),
+	}
+	for wrong, entry := range m {
+		if wrong == "" {
+			continue
+		}
+		last := wrong[len(wrong)-1]
+		if entry.ForceCaseMatch {
+			idx.csLast[last] = append(idx.csLast[last], wrong)
+		} else {
+			lower := toLowerByte(last)
+			idx.ciLast[lower] = append(idx.ciLast[lower], wrong)
+		}
+	}
+	return idx
+}
+
+// candidates returns every correction key that could possibly match given
+// the actual last byte of the buffer being tested.
+func (idx *correctionIndex) candidates(lastByte byte) []string {
+	var out []string
+	if v, ok := idx.csLast[lastByte]; ok {
+		out = append(out, v...)
+	}
+	if v, ok := idx.ciLast[toLowerByte(lastByte)]; ok {
+		out = append(out, v...)
+	}
+	return out
+}
+
 var correcting atomic.Int32
 
 var capslockOn bool
@@ -241,6 +298,8 @@ func main() {
 	}
 
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
+	endActionIndex := buildCorrectionIndex(endActionRequiredConnections)
+	anywhereIndex := buildCorrectionIndex(anywhereCorrections)
 
 	conn, err := IMan.Connect("autocorrect", IMan.ModeFilter)
 	if err != nil {
@@ -315,14 +374,21 @@ func main() {
 
 						char, exists := table[int(ev.Code)]
 						if exists && char != 0 {
-							tryCorrect := func(table map[string]CorrectionEntry) (bool, []byte) {
-								for wrong, entry := range table {
-									var testBuffer []byte
-									if entry.NoEndActionRequired {
-										testBuffer = append(buffer, char)
-									} else {
-										testBuffer = buffer
+							tryCorrect := func(idx *correctionIndex, isAnywhere bool) (bool, []byte) {
+								var testBuffer []byte
+								var lastByte byte
+								if isAnywhere {
+									testBuffer = append(buffer, char)
+									lastByte = char
+								} else {
+									if len(buffer) == 0 {
+										return false, buffer
 									}
+									testBuffer = buffer
+									lastByte = buffer[len(buffer)-1]
+								}
+								for _, wrong := range idx.candidates(lastByte) {
+									entry := idx.entries[wrong]
 									if entry.ForceCaseMatch {
 										if !bytes.HasSuffix(testBuffer, []byte(wrong)) {
 											continue
@@ -376,7 +442,7 @@ func main() {
 									case "replace":
 										{
 											correcting.Store(1)
-											_, err = conn.BlockInput(1)
+											_, err = conn.BlockInput(ev.Seq, 1)
 											if err != nil {
 												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
 												return true, buffer
@@ -393,7 +459,7 @@ func main() {
 										}
 									case "clear buffer":
 										{
-											_, err = conn.BlockInput(0)
+											_, err = conn.BlockInput(ev.Seq, 0)
 											if err != nil {
 												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
 												return true, buffer
@@ -411,12 +477,12 @@ func main() {
 								return false, buffer
 							}
 							if strings.Contains(TRIGGER_CHARS, string(char)) {
-								foundMatchingEntry, buffer = tryCorrect(anywhereCorrections)
+								foundMatchingEntry, buffer = tryCorrect(anywhereIndex, true)
 								if !foundMatchingEntry {
-									foundMatchingEntry, buffer = tryCorrect(endActionRequiredConnections)
+									foundMatchingEntry, buffer = tryCorrect(endActionIndex, false)
 								}
 							} else {
-								foundMatchingEntry, buffer = tryCorrect(anywhereCorrections)
+								foundMatchingEntry, buffer = tryCorrect(anywhereIndex, true)
 							}
 							println("foundMatchingEntry", foundMatchingEntry)
 							if !foundMatchingEntry {
@@ -438,7 +504,7 @@ func main() {
 			if ev.Value != 0 && correcting.Load() == 1 {
 				resp = 1 // block ALL events while correction is in flight
 			}
-			_, err = conn.BlockInput(resp)
+			_, err = conn.BlockInput(ev.Seq, resp)
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
@@ -447,18 +513,25 @@ func main() {
 	}
 }
 
+// sendMu serializes the event-sending portion of apply_correction. Without
+// it, two corrections firing close together (each in its own goroutine)
+// could interleave their backspace/keystroke events on the shared injection
+// connection, since nothing else prevents a second goroutine's send loop
+// from starting before the first one's has finished.
+var sendMu sync.Mutex
+
 func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEntry) {
 	// println("asdjkasdjkasdjkads", wrong, right, triggerChar, entry.NoEndActionRequired, conn.PressedKeys())
+	sendMu.Lock()
+	defer sendMu.Unlock()
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]IMan.WireEvent, 0)
 	var lastUsedShift bool = conn.ShiftPressedReal()
 	backspaces := len(wrong)
-	println(entry.Action, entry.NoEndActionRequired, entry.ReplaceWith, backspaces)
 	if entry.NoEndActionRequired && entry.Action == "replace" {
 		backspaces--
 	}
-	println(backspaces)
 	for range backspaces {
 		events = append(events, []IMan.WireEvent{
 			{
