@@ -10,7 +10,6 @@ require (
 )
 
 require (
-	github.com/rsa17826/gopp v0.0.4 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	golang.org/x/sys v0.46.0 // indirect
 )
