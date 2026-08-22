@@ -528,10 +528,25 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	defer correcting.Store(0)
 	events := make([]IMan.WireEvent, 0)
 	var lastUsedShift bool = conn.ShiftPressedReal()
-	backspaces := len(wrong)
+
+	// Only backspace/retype the part of "wrong" that actually differs from
+	// "right". If the replacement starts with the same characters as the
+	// mistyped word, those leading characters are already correct on screen
+	// and don't need to be deleted and retyped.
+	commonPrefixLen := 0
+	maxCommon := min(len(right), len(wrong))
+	for commonPrefixLen < maxCommon && wrong[commonPrefixLen] == right[commonPrefixLen] {
+		commonPrefixLen++
+	}
+
+	backspaces := len(wrong) - commonPrefixLen
 	if entry.NoEndActionRequired && entry.Action == "replace" {
 		backspaces--
 	}
+	if backspaces < 0 {
+		log.Panicf("backspaces < 0 [%d] [%v] [%v] [%d]", commonPrefixLen, wrong, right, commonPrefixLen)
+	}
+	right = right[commonPrefixLen:]
 	for range backspaces {
 		events = append(events, []IMan.WireEvent{
 			{
