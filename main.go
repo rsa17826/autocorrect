@@ -276,7 +276,7 @@ func main() {
 		{Keys: []string{"capsHasBeenDisabled"}, AfterCount: 0, Target: &capsHasBeenDisabled, Description: "caps is not used to toggle the case state so don't detect use of the capslock button as if it does that"},
 		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "autocorrect_daemon", "corrections.json")}},
 	})
-	send, err = IMan.Connect("autocorrect", IMan.ModeInjection)
+	send, err = IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false})
 	if err != nil {
 		panic(err)
 	}
