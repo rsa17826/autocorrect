@@ -276,7 +276,7 @@ func main() {
 		{Keys: []string{"capsHasBeenDisabled"}, AfterCount: 0, Target: &capsHasBeenDisabled, Description: "caps is not used to toggle the case state so don't detect use of the capslock button as if it does that"},
 		{Keys: []string{"corrections"}, AfterCount: 1, Target: &correctionsPath, Description: "Path to corrections JSON file", Default: []any{filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "autocorrect_daemon", "corrections.json")}},
 	})
-	send, err = IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false})
+	send, err = IMan.Connect("autocorrect", IMan.ModeInjection)
 	if err != nil {
 		panic(err)
 	}
@@ -301,7 +301,7 @@ func main() {
 	endActionIndex := buildCorrectionIndex(endActionRequiredConnections)
 	anywhereIndex := buildCorrectionIndex(anywhereCorrections)
 
-	conn, err := IMan.Connect("autocorrect", IMan.ModeFilter)
+	conn, err := IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false})
 	if err != nil {
 		panic(err)
 	}
@@ -649,7 +649,10 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 
 	// Initialize context registration handshake
 	for i, stroke := range events {
-		send.Send(stroke)
+		err := send.Send(stroke)
+		if err != nil {
+			panic(err)
+		}
 		// binary.Write(conn, binary.LittleEndian, stroke)
 		// binary.Write(conn, binary.LittleEndian, IMan.WireEvent{})
 		if i != 0 && i%20 == 0 {
