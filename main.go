@@ -301,7 +301,7 @@ func main() {
 	endActionIndex := buildCorrectionIndex(endActionRequiredConnections)
 	anywhereIndex := buildCorrectionIndex(anywhereCorrections)
 
-	conn, err := IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false})
+	conn, err := IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false}, IMan.ModeFilter)
 	if err != nil {
 		panic(err)
 	}
