@@ -615,6 +615,14 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 		}...)
 	}
 	if !entry.NoEndActionRequired {
+		events = append(events, IMan.WireEvent{})
+		if input.CharKeyMap[triggerChar].Shift {
+			events = append(events, IMan.WireEvent{
+				Type:  input.EV_KEY,
+				Code:  shiftKeyToUse,
+				Value: int32(1),
+			})
+		}
 		events = append(events, []IMan.WireEvent{
 			{},
 			{
@@ -632,8 +640,14 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				Code:  input.CharKeyMap[triggerChar].Code,
 				Value: int32(0),
 			},
-			{},
 		}...)
+		if input.CharKeyMap[triggerChar].Shift {
+			events = append(events, IMan.WireEvent{
+				Type:  input.EV_KEY,
+				Code:  shiftKeyToUse,
+				Value: int32(1),
+			})
+		}
 	}
 	if lshiftPressed || rshiftPressed {
 		if lshiftPressed {
@@ -654,10 +668,10 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				},
 			}...)
 		}
-		events = append(events, []IMan.WireEvent{
-			{},
-		}...)
 	}
+	events = append(events, []IMan.WireEvent{
+		{},
+	}...)
 	// Initialize context registration handshake
 	for i, stroke := range events {
 		err := send.Send(stroke)
