@@ -267,7 +267,7 @@ func (idx *correctionIndex) candidates(lastByte byte) []string {
 var correcting atomic.Int32
 
 var capslockOn bool
-var conn IMan.ManagerConnection
+var conn *IMan.ManagerConnection
 
 func main() {
 	var capsHasBeenDisabled bool
@@ -300,8 +300,7 @@ func main() {
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 	endActionIndex := buildCorrectionIndex(endActionRequiredConnections)
 	anywhereIndex := buildCorrectionIndex(anywhereCorrections)
-
-	conn, err := IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false}, IMan.ModeFilter)
+	conn, err = IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false}, IMan.ModeFilter)
 	if err != nil {
 		panic(err)
 	}
@@ -527,8 +526,17 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	correcting.Store(1)
 	defer correcting.Store(0)
 	events := make([]IMan.WireEvent, 0)
-	var lastUsedShift bool = conn.ShiftPressedReal()
-
+	var lshiftPressed bool = conn.IsPressedReal(input.KEY_LEFTSHIFT)
+	var rshiftPressed bool = conn.IsPressedReal(input.KEY_RIGHTSHIFT)
+	var lastUsedShift bool = lshiftPressed || rshiftPressed
+	var shiftKeyToUse uint16
+	if lshiftPressed && rshiftPressed || (!lshiftPressed && !rshiftPressed) {
+		shiftKeyToUse = input.KEY_LEFTSHIFT
+	} else if lshiftPressed {
+		shiftKeyToUse = input.KEY_LEFTSHIFT
+	} else if rshiftPressed {
+		shiftKeyToUse = input.KEY_RIGHTSHIFT
+	}
 	// Only backspace/retype the part of "wrong" that actually differs from
 	// "right". If the replacement starts with the same characters as the
 	// mistyped word, those leading characters are already correct on screen
@@ -571,7 +579,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				events = append(events, []IMan.WireEvent{
 					{
 						Type:  input.EV_KEY,
-						Code:  input.KEY_LEFTSHIFT,
+						Code:  shiftKeyToUse,
 						Value: int32(1),
 					},
 					{},
@@ -580,7 +588,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				events = append(events, []IMan.WireEvent{
 					{
 						Type:  input.EV_KEY,
-						Code:  input.KEY_LEFTSHIFT,
+						Code:  shiftKeyToUse,
 						Value: int32(0),
 					},
 					{},
@@ -606,7 +614,7 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	if lastUsedShift != conn.ShiftPressedReal() {
+	if lastUsedShift != (lshiftPressed || rshiftPressed) {
 		if conn.ShiftPressedReal() {
 			events = append(events, []IMan.WireEvent{
 				{
@@ -646,7 +654,29 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			{},
 		}...)
 	}
-
+	if lshiftPressed || rshiftPressed {
+		if lshiftPressed {
+			events = append(events, []IMan.WireEvent{
+				{
+					Type:  input.EV_KEY,
+					Code:  input.KEY_LEFTSHIFT,
+					Value: int32(1),
+				},
+			}...)
+		}
+		if rshiftPressed {
+			events = append(events, []IMan.WireEvent{
+				{
+					Type:  input.EV_KEY,
+					Code:  input.KEY_RIGHTSHIFT,
+					Value: int32(1),
+				},
+			}...)
+		}
+		events = append(events, []IMan.WireEvent{
+			{},
+		}...)
+	}
 	// Initialize context registration handshake
 	for i, stroke := range events {
 		err := send.Send(stroke)

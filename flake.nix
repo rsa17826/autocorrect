@@ -1,6 +1,4 @@
 {
-  description = "An input manager to prevent having to chain devices and allow wasily unlocking keyboard";
-
   inputs = {
     nixpkgs = {
       url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -34,6 +32,7 @@
         devShells = {
           # Development environment
           default = pkgs.mkShell {
+            hardeningDisable = [ "fortify" ];
             buildInputs = with pkgs; [
               go
               gopls
