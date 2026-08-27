@@ -530,7 +530,14 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 	var rshiftPressed bool = conn.IsPressedReal(input.KEY_RIGHTSHIFT)
 	var lastUsedShift bool = lshiftPressed || rshiftPressed
 	var shiftKeyToUse uint16
-	if lshiftPressed && rshiftPressed || (!lshiftPressed && !rshiftPressed) {
+	if lshiftPressed && rshiftPressed {
+		events = append(events, IMan.WireEvent{
+			Type:  input.EV_KEY,
+			Code:  input.KEY_RIGHTSHIFT,
+			Value: int32(0),
+		})
+		shiftKeyToUse = input.KEY_LEFTSHIFT
+	} else if !lshiftPressed && !rshiftPressed {
 		shiftKeyToUse = input.KEY_LEFTSHIFT
 	} else if lshiftPressed {
 		shiftKeyToUse = input.KEY_LEFTSHIFT
