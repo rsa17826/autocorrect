@@ -614,25 +614,6 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	if lastUsedShift != (lshiftPressed || rshiftPressed) {
-		if conn.ShiftPressedReal() {
-			events = append(events, []IMan.WireEvent{
-				{
-					Type:  input.EV_KEY,
-					Code:  input.KEY_LEFTSHIFT,
-					Value: int32(1),
-				},
-			}...)
-		} else {
-			events = append(events, []IMan.WireEvent{
-				{
-					Type:  input.EV_KEY,
-					Code:  input.KEY_LEFTSHIFT,
-					Value: int32(0),
-				},
-			}...)
-		}
-	}
 	if !entry.NoEndActionRequired {
 		events = append(events, []IMan.WireEvent{
 			{},
