@@ -648,6 +648,26 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				Value: int32(0),
 			},
 		}...)
+		if lshiftPressed || rshiftPressed {
+			if lshiftPressed {
+				events = append(events, []IMan.WireEvent{
+					{
+						Type:  input.EV_KEY,
+						Code:  input.KEY_LEFTSHIFT,
+						Value: int32(1),
+					},
+				}...)
+			}
+			if rshiftPressed {
+				events = append(events, []IMan.WireEvent{
+					{
+						Type:  input.EV_KEY,
+						Code:  input.KEY_RIGHTSHIFT,
+						Value: int32(1),
+					},
+				}...)
+			}
+		}
 		if input.CharKeyMap[triggerChar].Shift {
 			events = append(events, IMan.WireEvent{
 				Type:  input.EV_KEY,
@@ -655,25 +675,26 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				Value: int32(1),
 			})
 		}
-	}
-	if lshiftPressed || rshiftPressed {
-		if lshiftPressed {
-			events = append(events, []IMan.WireEvent{
-				{
-					Type:  input.EV_KEY,
-					Code:  input.KEY_LEFTSHIFT,
-					Value: int32(1),
-				},
-			}...)
-		}
-		if rshiftPressed {
-			events = append(events, []IMan.WireEvent{
-				{
-					Type:  input.EV_KEY,
-					Code:  input.KEY_RIGHTSHIFT,
-					Value: int32(1),
-				},
-			}...)
+	} else {
+		if lshiftPressed || rshiftPressed {
+			if lshiftPressed {
+				events = append(events, []IMan.WireEvent{
+					{
+						Type:  input.EV_KEY,
+						Code:  input.KEY_LEFTSHIFT,
+						Value: int32(1),
+					},
+				}...)
+			}
+			if rshiftPressed {
+				events = append(events, []IMan.WireEvent{
+					{
+						Type:  input.EV_KEY,
+						Code:  input.KEY_RIGHTSHIFT,
+						Value: int32(1),
+					},
+				}...)
+			}
 		}
 	}
 	events = append(events, []IMan.WireEvent{
