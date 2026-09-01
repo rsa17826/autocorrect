@@ -621,17 +621,33 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 			},
 		}...)
 	}
-	if !entry.NoEndActionRequired {
+	if lshiftPressed {
+		events = append(events, IMan.WireEvent{
+			Type:  input.EV_KEY,
+			Code:  input.KEY_LEFTSHIFT,
+			Value: int32(1),
+		})
+	}
+	if rshiftPressed {
+		events = append(events, IMan.WireEvent{
+			Type:  input.EV_KEY,
+			Code:  input.KEY_RIGHTSHIFT,
+			Value: int32(1),
+		})
+	}
+	if lastUsedShift && !(lshiftPressed || rshiftPressed) {
+		events = append(events, IMan.WireEvent{
+			Type:  input.EV_KEY,
+			Code:  shiftKeyToUse,
+			Value: int32(0),
+		})
+	}
+	if entry.NoEndActionRequired {
+		// pass
+	} else {
 		events = append(events, IMan.WireEvent{})
-		if input.CharKeyMap[triggerChar].Shift {
-			events = append(events, IMan.WireEvent{
-				Type:  input.EV_KEY,
-				Code:  shiftKeyToUse,
-				Value: int32(1),
-			})
-		}
+		// press triggerChar
 		events = append(events, []IMan.WireEvent{
-			{},
 			{
 				Type:  input.EV_KEY,
 				Code:  input.CharKeyMap[triggerChar].Code,
@@ -648,54 +664,6 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 				Value: int32(0),
 			},
 		}...)
-		if lshiftPressed || rshiftPressed {
-			if lshiftPressed {
-				events = append(events, []IMan.WireEvent{
-					{
-						Type:  input.EV_KEY,
-						Code:  input.KEY_LEFTSHIFT,
-						Value: int32(1),
-					},
-				}...)
-			}
-			if rshiftPressed {
-				events = append(events, []IMan.WireEvent{
-					{
-						Type:  input.EV_KEY,
-						Code:  input.KEY_RIGHTSHIFT,
-						Value: int32(1),
-					},
-				}...)
-			}
-		}
-		if input.CharKeyMap[triggerChar].Shift {
-			events = append(events, IMan.WireEvent{
-				Type:  input.EV_KEY,
-				Code:  shiftKeyToUse,
-				Value: int32(1),
-			})
-		}
-	} else {
-		if lshiftPressed || rshiftPressed {
-			if lshiftPressed {
-				events = append(events, []IMan.WireEvent{
-					{
-						Type:  input.EV_KEY,
-						Code:  input.KEY_LEFTSHIFT,
-						Value: int32(1),
-					},
-				}...)
-			}
-			if rshiftPressed {
-				events = append(events, []IMan.WireEvent{
-					{
-						Type:  input.EV_KEY,
-						Code:  input.KEY_RIGHTSHIFT,
-						Value: int32(1),
-					},
-				}...)
-			}
-		}
 	}
 	events = append(events, []IMan.WireEvent{
 		{},
