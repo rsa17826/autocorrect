@@ -142,6 +142,9 @@ var RESET_KEYS = []int{
 	input.KEY_PAGEDOWN,
 	input.KEY_DELETE,
 	input.KEY_ESC,
+	input.BTN_LEFT,
+	input.BTN_RIGHT,
+	input.BTN_MIDDLE,
 }
 var send *IMan.ManagerConnection
 var err error
@@ -264,6 +267,57 @@ func (idx *correctionIndex) candidates(lastByte byte) []string {
 	return out
 }
 
+// findCorrectionMatch scans idx for a correction whose "wrong" text is a
+// suffix of testBuffer (respecting ForceCaseMatch and word-boundary rules),
+// returning the first match found.
+func findCorrectionMatch(idx *correctionIndex, testBuffer []byte) (string, CorrectionEntry, bool) {
+	if len(testBuffer) == 0 {
+		return "", CorrectionEntry{}, false
+	}
+	lastByte := testBuffer[len(testBuffer)-1]
+	for _, wrong := range idx.candidates(lastByte) {
+		entry := idx.entries[wrong]
+		if entry.ForceCaseMatch {
+			if !bytes.HasSuffix(testBuffer, []byte(wrong)) {
+				continue
+			}
+		} else {
+			if !bytes.HasSuffix(bytes.ToLower(testBuffer), bytes.ToLower([]byte(wrong))) {
+				continue
+			}
+		}
+		wrongLen := len(wrong)
+		bufLen := len(testBuffer)
+		if !entry.AllowTriggeringInsideWords {
+			isStartOfWord := false
+			if bufLen == wrongLen {
+				isStartOfWord = true
+			} else {
+				prev := testBuffer[bufLen-wrongLen-1]
+				curr := testBuffer[bufLen-wrongLen]
+				var next byte
+				if bufLen-wrongLen+1 < bufLen {
+					next = testBuffer[bufLen-wrongLen+1]
+				}
+				if !unicode.IsLetter(rune(prev)) {
+					isStartOfWord = true
+				}
+				if unicode.IsLower(rune(prev)) && unicode.IsUpper(rune(curr)) {
+					isStartOfWord = true
+				}
+				if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
+					isStartOfWord = true
+				}
+			}
+			if !isStartOfWord {
+				continue
+			}
+		}
+		return wrong, entry, true
+	}
+	return "", CorrectionEntry{}, false
+}
+
 var correcting atomic.Int32
 
 var capslockOn bool
@@ -300,7 +354,7 @@ func main() {
 	endActionRequiredConnections, anywhereCorrections := parseCorrectionsConfig(rawCorrections)
 	endActionIndex := buildCorrectionIndex(endActionRequiredConnections)
 	anywhereIndex := buildCorrectionIndex(anywhereCorrections)
-	conn, err = IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false}, IMan.ModeFilter)
+	conn, err = IMan.ConnectFilter("autocorrect", IMan.FilterSpec{Keyboards: true, Mice: false, Keycodes: []uint16{input.BTN_LEFT, input.BTN_RIGHT, input.BTN_MIDDLE}}, IMan.ModeFilter)
 	if err != nil {
 		panic(err)
 	}
@@ -345,7 +399,36 @@ func main() {
 			// Cursor moved (arrows, home/end, page up/down, delete, esc) — the
 			// buffer no longer reflects the text immediately before the caret,
 			// so drop it. Also applies on correction-blocked replay window.
+			// Before dropping it, try matching an end-action-required
+			// correction against the buffer as it stands, exactly as if the
+			// reset key were the end-action trigger character.
 			if isKeyPress && slices.Contains(RESET_KEYS, int(ev.Code)) {
+				if wrong, entry, found := findCorrectionMatch(endActionIndex, buffer); found {
+					println("!Correcting (reset key):", wrong, "->", entry.ReplaceWith,
+						"forceCaseMatch", entry.ForceCaseMatch,
+						"noEndActionRequired", entry.NoEndActionRequired,
+						"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
+						"action", entry.Action)
+					switch entry.Action {
+					case "replace":
+						correcting.Store(1)
+						_, err = conn.BlockInput(ev.Seq, 1)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+						} else {
+							go apply_correction(wrong, entry.ReplaceWith, uint16(ev.Code), entry)
+							foundMatchingEntry = true
+						}
+					case "clear buffer":
+						_, err = conn.BlockInput(ev.Seq, 0)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+						}
+						foundMatchingEntry = true
+					default:
+						println("ERROR: entry.Action: ", entry.Action, wrong, entry.ReplaceWith)
+					}
+				}
 				buffer = buffer[:0]
 			}
 
@@ -375,61 +458,18 @@ func main() {
 						if exists && char != 0 {
 							tryCorrect := func(idx *correctionIndex, isAnywhere bool) (bool, []byte) {
 								var testBuffer []byte
-								var lastByte byte
 								if isAnywhere {
 									testBuffer = append(buffer, char)
-									lastByte = char
 								} else {
 									if len(buffer) == 0 {
 										return false, buffer
 									}
 									testBuffer = buffer
-									lastByte = buffer[len(buffer)-1]
 								}
-								for _, wrong := range idx.candidates(lastByte) {
-									entry := idx.entries[wrong]
-									if entry.ForceCaseMatch {
-										if !bytes.HasSuffix(testBuffer, []byte(wrong)) {
-											continue
-										}
-									} else {
-										if !bytes.HasSuffix(bytes.ToLower(testBuffer), bytes.ToLower([]byte(wrong))) {
-											continue
-										}
-									}
+								wrong, entry, found := findCorrectionMatch(idx, testBuffer)
+								if found {
 									wrongLen := len(wrong)
 									bufLen := len(testBuffer)
-									println("?Correcting:", wrong, "->", entry.ReplaceWith,
-										"forceCaseMatch", entry.ForceCaseMatch,
-										"noEndActionRequired", entry.NoEndActionRequired,
-										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
-										"action", entry.Action)
-									// println("bufLen", bufLen, wrongLen)
-									if !entry.AllowTriggeringInsideWords {
-										isStartOfWord := false
-										if bufLen == wrongLen {
-											isStartOfWord = true
-										} else {
-											prev := testBuffer[bufLen-wrongLen-1]
-											curr := testBuffer[bufLen-wrongLen]
-											var next byte
-											if bufLen-wrongLen+1 < bufLen {
-												next = testBuffer[bufLen-wrongLen+1]
-											}
-											if !unicode.IsLetter(rune(prev)) {
-												isStartOfWord = true
-											}
-											if unicode.IsLower(rune(prev)) && unicode.IsUpper(rune(curr)) {
-												isStartOfWord = true
-											}
-											if next != 0 && unicode.IsUpper(rune(prev)) && unicode.IsUpper(rune(curr)) && unicode.IsLower(rune(next)) {
-												isStartOfWord = true
-											}
-										}
-										if !isStartOfWord {
-											continue
-										}
-									}
 
 									println("!Correcting:", wrong, "->", entry.ReplaceWith,
 										"forceCaseMatch", entry.ForceCaseMatch,
@@ -447,7 +487,7 @@ func main() {
 												return true, buffer
 											}
 											rightWord := entry.ReplaceWith
-											go apply_correction(wrong, rightWord, rune(char), entry)
+											go apply_correction(wrong, rightWord, input.CharKeyMap[rune(char)].Code, entry)
 											buffer = buffer[:bufLen-wrongLen]
 											buffer = append(buffer, []byte(entry.ReplaceWith)...)
 											buffer = append(buffer, char)
@@ -519,8 +559,8 @@ func main() {
 // from starting before the first one's has finished.
 var sendMu sync.Mutex
 
-func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEntry) {
-	// println("asdjkasdjkasdjkads", wrong, right, triggerChar, entry.NoEndActionRequired, conn.PressedKeys())
+func apply_correction(wrong, right string, triggerKeyCode uint16, entry CorrectionEntry) {
+	// println("asdjkasdjkasdjkads", wrong, right, triggerKeyCode, entry.NoEndActionRequired, conn.PressedKeys())
 	sendMu.Lock()
 	defer sendMu.Unlock()
 	correcting.Store(1)
@@ -646,23 +686,23 @@ func apply_correction(wrong, right string, triggerChar rune, entry CorrectionEnt
 		// pass
 	} else {
 		events = append(events, IMan.WireEvent{})
-		// press triggerChar
+		// press trigger key
 		events = append(events, []IMan.WireEvent{
 			{
 				Type:  input.EV_KEY,
-				Code:  input.CharKeyMap[triggerChar].Code,
+				Code:  triggerKeyCode,
 				Value: int32(0),
 			},
 			{
 				Type:  input.EV_KEY,
-				Code:  input.CharKeyMap[triggerChar].Code,
+				Code:  triggerKeyCode,
 				Value: int32(1),
 			},
-			{
-				Type:  input.EV_KEY,
-				Code:  input.CharKeyMap[triggerChar].Code,
-				Value: int32(0),
-			},
+			// {
+			// 	Type:  input.EV_KEY,
+			// 	Code:  triggerKeyCode,
+			// 	Value: int32(0),
+			// },
 		}...)
 	}
 	events = append(events, []IMan.WireEvent{
