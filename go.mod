@@ -11,5 +11,5 @@ require (
 
 require (
 	github.com/segmentio/asm v1.1.3 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 )
