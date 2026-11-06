@@ -396,42 +396,6 @@ func main() {
 			// We handle Modifiers on both Press AND Release, but ignore text updates on Release.
 			isKeyPress := (ev.Value == 1 || ev.Value == 2)
 
-			// Cursor moved (arrows, home/end, page up/down, delete, esc) — the
-			// buffer no longer reflects the text immediately before the caret,
-			// so drop it. Also applies on correction-blocked replay window.
-			// Before dropping it, try matching an end-action-required
-			// correction against the buffer as it stands, exactly as if the
-			// reset key were the end-action trigger character.
-			if isKeyPress && slices.Contains(RESET_KEYS, int(ev.Code)) {
-				if wrong, entry, found := findCorrectionMatch(endActionIndex, buffer); found {
-					println("!Correcting (reset key):", wrong, "->", entry.ReplaceWith,
-						"forceCaseMatch", entry.ForceCaseMatch,
-						"noEndActionRequired", entry.NoEndActionRequired,
-						"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
-						"action", entry.Action)
-					switch entry.Action {
-					case "replace":
-						correcting.Store(1)
-						_, err = conn.BlockInput(ev.Seq, 1)
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-						} else {
-							go apply_correction(wrong, entry.ReplaceWith, uint16(ev.Code), entry)
-							foundMatchingEntry = true
-						}
-					case "clear buffer":
-						_, err = conn.BlockInput(ev.Seq, 0)
-						if err != nil {
-							fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-						}
-						foundMatchingEntry = true
-					default:
-						println("ERROR: entry.Action: ", entry.Action, wrong, entry.ReplaceWith)
-					}
-				}
-				buffer = buffer[:0]
-			}
-
 			switch ev.Code {
 			case input.KEY_CAPSLOCK:
 				if !capsHasBeenDisabled && isKeyPress {
@@ -515,10 +479,13 @@ func main() {
 								}
 								return false, buffer
 							}
-							if strings.Contains(TRIGGER_CHARS, string(char)) {
+							if strings.Contains(TRIGGER_CHARS, string(char)) || slices.Contains(RESET_KEYS, int(ev.Code)) {
 								foundMatchingEntry, buffer = tryCorrect(anywhereIndex, true)
 								if !foundMatchingEntry {
 									foundMatchingEntry, buffer = tryCorrect(endActionIndex, false)
+								}
+								if slices.Contains(RESET_KEYS, int(ev.Code)) {
+									buffer = buffer[:0]
 								}
 							} else {
 								foundMatchingEntry, buffer = tryCorrect(anywhereIndex, true)
