@@ -403,7 +403,71 @@ func main() {
 				}
 			default:
 				if isKeyPress && ev.Code <= 247 {
+					tryCorrect := func(char byte, idx *correctionIndex, isAnywhere bool) (bool, []byte) {
+						var testBuffer []byte
+						if isAnywhere {
+							testBuffer = append(buffer, char)
+						} else {
+							if len(buffer) == 0 {
+								return false, buffer
+							}
+							testBuffer = buffer
+						}
+						wrong, entry, found := findCorrectionMatch(idx, testBuffer)
+						if found {
+							wrongLen := len(wrong)
+							bufLen := len(testBuffer)
+
+							println("!Correcting:", wrong, "->", entry.ReplaceWith,
+								"forceCaseMatch", entry.ForceCaseMatch,
+								"noEndActionRequired", entry.NoEndActionRequired,
+								"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
+								"action", entry.Action)
+
+							switch entry.Action {
+							case "replace":
+								{
+									correcting.Store(1)
+									_, err = conn.BlockInput(ev.Seq, 1)
+									if err != nil {
+										fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+										return true, buffer
+									}
+									rightWord := entry.ReplaceWith
+									go apply_correction(wrong, rightWord, input.CharKeyMap[rune(char)].Code, entry)
+									buffer = buffer[:bufLen-wrongLen]
+									buffer = append(buffer, []byte(entry.ReplaceWith)...)
+									buffer = append(buffer, char)
+									if len(buffer) > BUFFER_MAX {
+										buffer = buffer[len(buffer)-BUFFER_MAX:]
+									}
+									return true, buffer
+								}
+							case "clear buffer":
+								{
+									_, err = conn.BlockInput(ev.Seq, 0)
+									if err != nil {
+										fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
+										return true, buffer
+									}
+									buffer = buffer[:0]
+									return true, buffer
+								}
+							default:
+								{
+									println("ERROR: entry.Action: ", entry.Action, wrong, entry.ReplaceWith)
+									return true, buffer
+								}
+							}
+						}
+						return false, buffer
+					}
 					if conn.AltPressedReal() || conn.CtrlPressedReal() || conn.MetaPressedReal() {
+						foundMatchingEntry, buffer = tryCorrect(0, anywhereIndex, true)
+						if !foundMatchingEntry {
+							foundMatchingEntry, buffer = tryCorrect(0, endActionIndex, false)
+						}
+						println("foundMatchingEntry", foundMatchingEntry)
 						buffer = buffer[:0]
 					} else {
 						if ev.Code == input.KEY_BACKSPACE {
@@ -420,75 +484,13 @@ func main() {
 
 						char, exists := table[int(ev.Code)]
 						if exists && char != 0 {
-							tryCorrect := func(idx *correctionIndex, isAnywhere bool) (bool, []byte) {
-								var testBuffer []byte
-								if isAnywhere {
-									testBuffer = append(buffer, char)
-								} else {
-									if len(buffer) == 0 {
-										return false, buffer
-									}
-									testBuffer = buffer
-								}
-								wrong, entry, found := findCorrectionMatch(idx, testBuffer)
-								if found {
-									wrongLen := len(wrong)
-									bufLen := len(testBuffer)
-
-									println("!Correcting:", wrong, "->", entry.ReplaceWith,
-										"forceCaseMatch", entry.ForceCaseMatch,
-										"noEndActionRequired", entry.NoEndActionRequired,
-										"allowTriggeringInsideWords", entry.AllowTriggeringInsideWords,
-										"action", entry.Action)
-
-									switch entry.Action {
-									case "replace":
-										{
-											correcting.Store(1)
-											_, err = conn.BlockInput(ev.Seq, 1)
-											if err != nil {
-												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-												return true, buffer
-											}
-											rightWord := entry.ReplaceWith
-											go apply_correction(wrong, rightWord, input.CharKeyMap[rune(char)].Code, entry)
-											buffer = buffer[:bufLen-wrongLen]
-											buffer = append(buffer, []byte(entry.ReplaceWith)...)
-											buffer = append(buffer, char)
-											if len(buffer) > BUFFER_MAX {
-												buffer = buffer[len(buffer)-BUFFER_MAX:]
-											}
-											return true, buffer
-										}
-									case "clear buffer":
-										{
-											_, err = conn.BlockInput(ev.Seq, 0)
-											if err != nil {
-												fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
-												return true, buffer
-											}
-											buffer = buffer[:0]
-											return true, buffer
-										}
-									default:
-										{
-											println("ERROR: entry.Action: ", entry.Action, wrong, entry.ReplaceWith)
-											return true, buffer
-										}
-									}
-								}
-								return false, buffer
-							}
 							if strings.Contains(TRIGGER_CHARS, string(char)) || slices.Contains(RESET_KEYS, int(ev.Code)) {
-								foundMatchingEntry, buffer = tryCorrect(anywhereIndex, true)
+								foundMatchingEntry, buffer = tryCorrect(char, anywhereIndex, true)
 								if !foundMatchingEntry {
-									foundMatchingEntry, buffer = tryCorrect(endActionIndex, false)
-								}
-								if slices.Contains(RESET_KEYS, int(ev.Code)) {
-									buffer = buffer[:0]
+									foundMatchingEntry, buffer = tryCorrect(char, endActionIndex, false)
 								}
 							} else {
-								foundMatchingEntry, buffer = tryCorrect(anywhereIndex, true)
+								foundMatchingEntry, buffer = tryCorrect(char, anywhereIndex, true)
 							}
 							println("foundMatchingEntry", foundMatchingEntry)
 							if !foundMatchingEntry {
@@ -511,6 +513,9 @@ func main() {
 				resp = 1 // block ALL events while correction is in flight
 			}
 			_, err = conn.BlockInput(ev.Seq, resp)
+		}
+		if slices.Contains(RESET_KEYS, int(ev.Code)) {
+			buffer = buffer[:0]
 		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to send filter response byte: %v\n", err)
@@ -652,25 +657,27 @@ func apply_correction(wrong, right string, triggerKeyCode uint16, entry Correcti
 	if entry.NoEndActionRequired {
 		// pass
 	} else {
-		events = append(events, IMan.WireEvent{})
-		// press trigger key
-		events = append(events, []IMan.WireEvent{
-			{
-				Type:  input.EV_KEY,
-				Code:  triggerKeyCode,
-				Value: int32(0),
-			},
-			{
-				Type:  input.EV_KEY,
-				Code:  triggerKeyCode,
-				Value: int32(1),
-			},
-			// {
-			// 	Type:  input.EV_KEY,
-			// 	Code:  triggerKeyCode,
-			// 	Value: int32(0),
-			// },
-		}...)
+		if triggerKeyCode != 0 {
+			events = append(events, IMan.WireEvent{})
+			// press trigger key
+			events = append(events, []IMan.WireEvent{
+				{
+					Type:  input.EV_KEY,
+					Code:  triggerKeyCode,
+					Value: int32(0),
+				},
+				{
+					Type:  input.EV_KEY,
+					Code:  triggerKeyCode,
+					Value: int32(1),
+				},
+				// {
+				// 	Type:  input.EV_KEY,
+				// 	Code:  triggerKeyCode,
+				// 	Value: int32(0),
+				// },
+			}...)
+		}
 	}
 	events = append(events, []IMan.WireEvent{
 		{},
