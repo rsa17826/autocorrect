@@ -146,6 +146,11 @@ var RESET_KEYS = []int{
 	input.BTN_RIGHT,
 	input.BTN_MIDDLE,
 }
+var MODIFIER_KEYS = []uint16{
+	input.KEY_LEFTCTRL, input.KEY_RIGHTCTRL,
+	input.KEY_LEFTALT, input.KEY_RIGHTALT,
+	input.KEY_LEFTMETA, input.KEY_RIGHTMETA,
+}
 var send *IMan.ManagerConnection
 var err error
 
@@ -403,7 +408,7 @@ func main() {
 				}
 			default:
 				if isKeyPress && ev.Code <= 247 {
-					tryCorrect := func(char byte, idx *correctionIndex, isAnywhere bool) (bool, []byte) {
+					tryCorrect := func(char byte, triggerCode uint16, idx *correctionIndex, isAnywhere bool) (bool, []byte) {
 						var testBuffer []byte
 						if isAnywhere {
 							testBuffer = append(buffer, char)
@@ -434,7 +439,7 @@ func main() {
 										return true, buffer
 									}
 									rightWord := entry.ReplaceWith
-									go apply_correction(wrong, rightWord, input.CharKeyMap[rune(char)].Code, entry)
+									go apply_correction(wrong, rightWord, triggerCode, entry)
 									buffer = buffer[:bufLen-wrongLen]
 									buffer = append(buffer, []byte(entry.ReplaceWith)...)
 									buffer = append(buffer, char)
@@ -463,9 +468,9 @@ func main() {
 						return false, buffer
 					}
 					if conn.AltPressedReal() || conn.CtrlPressedReal() || conn.MetaPressedReal() {
-						foundMatchingEntry, buffer = tryCorrect(0, anywhereIndex, true)
+						foundMatchingEntry, buffer = tryCorrect(0, ev.Code, anywhereIndex, true)
 						if !foundMatchingEntry {
-							foundMatchingEntry, buffer = tryCorrect(0, endActionIndex, false)
+							foundMatchingEntry, buffer = tryCorrect(0, ev.Code, endActionIndex, false)
 						}
 						println("foundMatchingEntry", foundMatchingEntry)
 						buffer = buffer[:0]
@@ -485,12 +490,12 @@ func main() {
 						char, exists := table[int(ev.Code)]
 						if exists && char != 0 {
 							if strings.Contains(TRIGGER_CHARS, string(char)) || slices.Contains(RESET_KEYS, int(ev.Code)) {
-								foundMatchingEntry, buffer = tryCorrect(char, anywhereIndex, true)
+								foundMatchingEntry, buffer = tryCorrect(char, ev.Code, anywhereIndex, true)
 								if !foundMatchingEntry {
-									foundMatchingEntry, buffer = tryCorrect(char, endActionIndex, false)
+									foundMatchingEntry, buffer = tryCorrect(char, ev.Code, endActionIndex, false)
 								}
 							} else {
-								foundMatchingEntry, buffer = tryCorrect(char, anywhereIndex, true)
+								foundMatchingEntry, buffer = tryCorrect(char, ev.Code, anywhereIndex, true)
 							}
 							println("foundMatchingEntry", foundMatchingEntry)
 							if !foundMatchingEntry {
@@ -555,6 +560,20 @@ func apply_correction(wrong, right string, triggerKeyCode uint16, entry Correcti
 		shiftKeyToUse = input.KEY_LEFTSHIFT
 	} else if rshiftPressed {
 		shiftKeyToUse = input.KEY_RIGHTSHIFT
+	}
+	// release held ctrl/alt/meta so the backspaces aren't alt+backspace etc,
+	// they get pressed again right before the trigger key
+	var heldMods []uint16
+	for _, m := range MODIFIER_KEYS {
+		if conn.IsPressedReal(m) {
+			heldMods = append(heldMods, m)
+		}
+	}
+	for _, m := range heldMods {
+		events = append(events, IMan.WireEvent{Type: input.EV_KEY, Code: m, Value: 0})
+	}
+	if len(heldMods) > 0 {
+		events = append(events, IMan.WireEvent{})
 	}
 	// Only backspace/retype the part of "wrong" that actually differs from
 	// "right". If the replacement starts with the same characters as the
@@ -654,30 +673,34 @@ func apply_correction(wrong, right string, triggerKeyCode uint16, entry Correcti
 			Value: int32(0),
 		})
 	}
+	for _, m := range heldMods {
+		events = append(events, IMan.WireEvent{Type: input.EV_KEY, Code: m, Value: 1})
+	}
+	if len(heldMods) > 0 {
+		events = append(events, IMan.WireEvent{})
+	}
 	if entry.NoEndActionRequired {
 		// pass
 	} else {
-		if triggerKeyCode != 0 {
-			events = append(events, IMan.WireEvent{})
-			// press trigger key
-			events = append(events, []IMan.WireEvent{
-				{
-					Type:  input.EV_KEY,
-					Code:  triggerKeyCode,
-					Value: int32(0),
-				},
-				{
-					Type:  input.EV_KEY,
-					Code:  triggerKeyCode,
-					Value: int32(1),
-				},
-				// {
-				// 	Type:  input.EV_KEY,
-				// 	Code:  triggerKeyCode,
-				// 	Value: int32(0),
-				// },
-			}...)
-		}
+		events = append(events, IMan.WireEvent{})
+		// press trigger key
+		events = append(events, []IMan.WireEvent{
+			{
+				Type:  input.EV_KEY,
+				Code:  triggerKeyCode,
+				Value: int32(0),
+			},
+			{
+				Type:  input.EV_KEY,
+				Code:  triggerKeyCode,
+				Value: int32(1),
+			},
+			// {
+			// 	Type:  input.EV_KEY,
+			// 	Code:  triggerKeyCode,
+			// 	Value: int32(0),
+			// },
+		}...)
 	}
 	events = append(events, []IMan.WireEvent{
 		{},
